@@ -12,7 +12,11 @@ with support for multi-GPU sharding and VJEPA-based rejection sampling.
 
 import argparse
 import json
-from diffusers.utils import export_to_video
+try:
+    from diffusers.utils import export_to_video
+except ImportError:
+    def export_to_video(*args, **kwargs):
+        raise ImportError("Missing dependency: diffusers. Install it before running video generation.")
 try:
     from diffusers.utils import load_video
 except ImportError:
@@ -26,6 +30,11 @@ import torch
 import cv2
 import os
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+os.environ.setdefault("PAD_HQ", "1")
+os.environ.setdefault("PAD_DURATION", "1")
+os.environ.setdefault("OFFLOAD_T5_CACHE", "true")
+os.environ.setdefault("OFFLOAD_VAE_CACHE", "true")
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 import sys
 import math
 import numpy as np
@@ -34,6 +43,18 @@ from utils import compute_vjepa_loss_sliding_window, load_vjepa_models_torchhub
 
 # Add MAGI-1 submodule to path
 MAGI1_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "MAGI-1")
+MAGI1_MODEL_VARIANTS = ("4.5B_base", "4.5B_distill", "4.5B_distill_quant", "24B_base")
+DEFAULT_MAGI1_MODEL_VARIANT = os.environ.get("MAGI1_MODEL_VARIANT", "4.5B_base")
+
+
+def default_magi1_config(model_variant: str) -> str:
+    if model_variant.startswith("4.5B_"):
+        return os.path.join(MAGI1_PATH, "example", "4.5B", f"{model_variant}_config.json")
+    if model_variant == "24B_base":
+        return os.path.join(MAGI1_PATH, "example", "24B", "24B_base_config.json")
+    raise ValueError(f"Unsupported MAGI-1 model variant: {model_variant}")
+
+
 if MAGI1_PATH not in sys.path:
     sys.path.insert(0, MAGI1_PATH)
 
@@ -106,6 +127,7 @@ def save_experiment_metadata(args, experiment_name, experiment_folder):
             "num_inference_steps": args.num_inference_steps,
             "cfg_scale": args.cfg_scale,
             "config_file": args.config_file,
+            "magi_model_variant": getattr(args, "magi_model_variant", None),
             "prompt_file": getattr(args, 'prompt_file', None),
             "batch_json": getattr(args, 'batch_json', None),
             "height": getattr(args, 'height', 480),
@@ -561,7 +583,19 @@ def main():
     parser = argparse.ArgumentParser(description="Generate videos from text prompts using MAGI-1 I2V.")
     parser.add_argument('--prompt_file', type=str, required=False, help='Path to the text file containing prompts.')
     parser.add_argument('--prompt', type=str, default=None, help='Single prompt text; overrides prompt_file when set.')
-    parser.add_argument('--config_file', type=str, required=True, help='Path to MAGI-1 configuration JSON file.')
+    parser.add_argument(
+        '--magi_model_variant',
+        type=str,
+        default=DEFAULT_MAGI1_MODEL_VARIANT,
+        choices=MAGI1_MODEL_VARIANTS,
+        help='MAGI-1 checkpoint/config variant used when --config_file is not set.',
+    )
+    parser.add_argument(
+        '--config_file',
+        type=str,
+        default=None,
+        help='Path to MAGI-1 configuration JSON file. Defaults to MAGI-1 4.5B base.',
+    )
     parser.add_argument('--output_folder', type=str, required=False, default="generated_videos", help='Folder to save the generated videos. If --output_path is set, its directory will be used instead.')
     parser.add_argument('--output_path', type=str, default=None, help='Explicit output video path (mp4) when using a single prompt.')
     parser.add_argument('--output_filename', type=str, default=None, help='Output filename (e.g., name.mp4) to use under the experiment folder when using a single prompt.')
@@ -617,6 +651,7 @@ def main():
 
     parser.add_argument('--seed', type=int, default=42, help='Seed for reproducibility.')
     args = parser.parse_args()
+    args.config_file = args.config_file or default_magi1_config(args.magi_model_variant)
 
     # Set deterministic behavior for reproducibility
     set_deterministic(seed=args.seed)

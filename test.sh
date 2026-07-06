@@ -1,11 +1,18 @@
 PROMPT="A ball falls from the table onto the floor"
-CONFIG="./MAGI-1/example/24B/24B_base_config.json"
+CONFIG="./MAGI-1/example/4.5B/4.5B_base_config.json"
 INIT="./example/0001_switch-frames_anyFPS_perspective-left_trimmed-ball-and-block-fall.jpg"
 OUT="./results/guidance_check"
 
+export MAGI1_MODEL_VARIANT=4.5B_base
+export PAD_HQ=1
+export PAD_DURATION=1
+export OFFLOAD_T5_CACHE=true
+export OFFLOAD_VAE_CACHE=true
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
 mkdir -p "$OUT"
 
-torchrun --standalone --nproc_per_node=8 generate_magi1.py \
+python generate_magi1.py \
   --config_file "$CONFIG" \
   --prompt "$PROMPT" \
   --init_image "$INIT" \
@@ -14,7 +21,7 @@ torchrun --standalone --nproc_per_node=8 generate_magi1.py \
   --guidance_scale 0 \
   --guidance_frequency 5
 
-torchrun --standalone --nproc_per_node=8 generate_magi1.py \
+python generate_magi1.py \
   --config_file "$CONFIG" \
   --prompt "$PROMPT" \
   --init_image "$INIT" \

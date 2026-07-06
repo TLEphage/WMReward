@@ -13,9 +13,9 @@
 #SBATCH --nodes=1                      # Each job uses 1 node
 #SBATCH --qos=h200_dream_high
 #SBATCH --ntasks-per-node=1           # 1 task per node
-#SBATCH --gres=gpu:8                  # 8 GPUs per node
+#SBATCH --gres=gpu:1                  # MAGI-1 4.5B can run on a single GPU
 #SBATCH --cpus-per-task=48            # Adjust based on your cluster
-#SBATCH --mem=512G                    # Adjust based on your cluster
+#SBATCH --mem=128G                    # Adjust based on your cluster
 #SBATCH --time=24:00:00               # Adjust based on expected runtime
 #SBATCH --output=jobs/job_%A_%a.out
 #SBATCH --error=jobs/job_%A_%a.err
@@ -26,10 +26,10 @@
 nvidia-smi
 
 # Multi-node configuration
-NUM_NODES=1                           # Total number of nodes
-NUM_GPUS_PER_NODE=8                   # GPUs per node
-TOTAL_GPUS=$((NUM_NODES * NUM_GPUS_PER_NODE))  # 8 total GPUs
-NODE_ID=${SLURM_ARRAY_TASK_ID}        # Current node ID (0-3)
+NUM_NODES=${NUM_NODES:-1}             # Total number of nodes
+NUM_GPUS_PER_NODE=${NUM_GPUS_PER_NODE:-1}  # GPUs per node
+TOTAL_GPUS=$((NUM_NODES * NUM_GPUS_PER_NODE))
+NODE_ID=${SLURM_ARRAY_TASK_ID:-0}     # Current node ID
 # NODE_ID=0
 
 echo "Starting node ${NODE_ID} of ${NUM_NODES} (GPUs per node: ${NUM_GPUS_PER_NODE}, Total GPUs: ${TOTAL_GPUS})"
@@ -53,8 +53,17 @@ CFG_SCALES=("6.0")
 # Disable Time Travel for simple algorithm
 GUIDANCE_RANGES=("0 0")
 
-# Path to MAGI-1 config file
-MAGI1_CONFIG_FILE="./MAGI-1/example/24B/24B_base_config.json"
+# Path to MAGI-1 config file. Override MAGI1_MODEL_VARIANT with
+# 4.5B_distill, 4.5B_distill_quant, or 24B_base if needed.
+MAGI1_MODEL_VARIANT="${MAGI1_MODEL_VARIANT:-4.5B_base}"
+if [[ "$MAGI1_MODEL_VARIANT" == 4.5B_* ]]; then
+    MAGI1_CONFIG_FILE="./MAGI-1/example/4.5B/${MAGI1_MODEL_VARIANT}_config.json"
+elif [[ "$MAGI1_MODEL_VARIANT" == "24B_base" ]]; then
+    MAGI1_CONFIG_FILE="./MAGI-1/example/24B/24B_base_config.json"
+else
+    echo "Unsupported MAGI1_MODEL_VARIANT=$MAGI1_MODEL_VARIANT"
+    exit 1
+fi
 
 # JSON batch describing entries with input image/video, prompt, and output path
 # Add or remove batch JSON files as needed
@@ -118,7 +127,7 @@ for SAMPLE_METHOD in "${SAMPLE_METHODS[@]}"; do
                     else
                         GROUP_NAME=$(basename "$(dirname "$BATCH_JSON")")
                     fi
-                    MODEL_OUTPUT_FOLDER="${OUTPUT_FOLDER}/${GROUP_NAME}/MAGI-1"
+                    MODEL_OUTPUT_FOLDER="${OUTPUT_FOLDER}/${GROUP_NAME}/MAGI-1-${MAGI1_MODEL_VARIANT}"
                     mkdir -p "$MODEL_OUTPUT_FOLDER"
 
                     # Loop over LR patterns; pass base output folder and let Python name runs
@@ -134,6 +143,7 @@ for SAMPLE_METHOD in "${SAMPLE_METHODS[@]}"; do
                             echo "  -> Launching worker on Node $NODE_ID, Local GPU $g (Global GPU $GLOBAL_GPU_IDX) with LR pattern $GUIDANCE_LR_PATTERN"
                             CUDA_VISIBLE_DEVICES=$g python generator_i2v_multinode.py \
                                 --config_file "$MAGI1_CONFIG_FILE" \
+                                --magi_model_variant "$MAGI1_MODEL_VARIANT" \
                                 --output_folder "$RUN_OUTPUT_FOLDER" \
                                 --batch_json "$BATCH_JSON" \
                                 --base_dir "$BASEDIR" \
