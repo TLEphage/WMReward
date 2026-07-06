@@ -51,8 +51,7 @@ pip install flashinfer-python==0.2.0.post2 \
 ```bash
 pip install "huggingface_hub[cli]"
 
-python -u downloader/download_magi1_4_5b.py \
-  --variant 4.5B_base
+python -u downloader/download_magi1_4_5b.py
 ```
 
 这一步做了什么：
@@ -67,15 +66,7 @@ WMReward/
     └── t5_pretrained/
 ```
 
-如果想进一步降低显存，可以改用：
-
-```bash
-python -u downloader/download_magi1_4_5b.py \
-  --variant 4.5B_distill
-
-python -u downloader/download_magi1_4_5b.py \
-  --variant 4.5B_distill_quant
-```
+当前下载脚本只在 `../PhyT2V/downloader/download_cogvideox5b.py` 的基础上做必要调整，默认只下载 `4.5B_base`。如果后续想下载 `4.5B_distill` 或 `4.5B_distill_quant`，按同一模板复制脚本并把 `INCLUDE_PREFIXES` 中的 `ckpt/magi/4.5B_base/` 改成对应目录即可。
 
 MAGI-1 只在视频生成阶段需要；如果只计算已有视频的 WMReward，则不需要下载 MAGI-1。
 
@@ -100,7 +91,7 @@ python generate_magi1.py \
 ./MAGI-1/example/4.5B/4.5B_base_config.json
 ```
 
-也可以通过 `--magi_model_variant 4.5B_distill` 或环境变量 `MAGI1_MODEL_VARIANT=4.5B_distill` 切换到其他 4.5B 变体。
+如果已按同样目录结构准备好其他权重，也可以通过 `--magi_model_variant 4.5B_distill` 或环境变量 `MAGI1_MODEL_VARIANT=4.5B_distill` 切换到其他 4.5B 变体。
 
 ### 步骤 5：计算单个视频的 WMReward/VJEPA surprise
 
@@ -360,15 +351,14 @@ downloader/command.sh
 
 作用：
 
-- `download_magi1_4_5b.py`：下载 MAGI-1 `4.5B_base`、`4.5B_distill` 或 `4.5B_distill_quant`，同时下载共享 VAE/T5，并整理到 `downloads/`。
+- `download_magi1_4_5b.py`：下载 MAGI-1 `4.5B_base`，同时下载共享 VAE/T5，并整理到 `downloads/`。该脚本只在 `../PhyT2V/downloader/download_cogvideox5b.py` 的基础上做了 include 过滤和路径整理。
 - `download_wan2_2_a14b_diffusers.py`：下载 Wan2.2 I2V/T2V A14B Diffusers 权重到 `../../models`。
-- 两个下载器都支持断点续传、HF token、`HF_ENDPOINT` 镜像。
+- 两个下载器都用 `curl -C -` 支持断点续传；Wan2.2 下载器额外支持 HF token 和 `HF_ENDPOINT` 镜像。
 
 MAGI-1 4.5B 默认下载命令：
 
 ```bash
-python -u downloader/download_magi1_4_5b.py \
-  --variant 4.5B_base
+python -u downloader/download_magi1_4_5b.py
 ```
 
 ### 5.2 MAGI-1 4.5B 适配改动
@@ -551,7 +541,7 @@ pip install -U diffusers transformers accelerate safetensors decord opencv-pytho
 ### 最小可行版本
 
 ```bash
-python -u downloader/download_magi1_4_5b.py --variant 4.5B_base
+python -u downloader/download_magi1_4_5b.py
 
 python generate_magi1.py \
   --prompt "A ball falls from the table onto the floor" \

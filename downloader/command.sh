@@ -4,7 +4,6 @@
 
 # MAGI-1 4.5B is the lightweight MAGI-1 default used by this repo.
 nohup python -u downloader/download_magi1_4_5b.py \
-  --variant 4.5B_base \
   > downloader/download_magi1_4_5b.log 2>&1 &
 
 # Progress:
