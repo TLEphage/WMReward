@@ -15,6 +15,20 @@ WMReward 的目标不是重新训练视频生成模型，而是在推理阶段�
 
 替换为 Wan2.2 后，推荐先做黑盒式 Best-of-N 复现：Wan2.2 负责生成 N 个候选视频，现有 VJEPA reward 代码负责评分和选择。这个方案不需要修改 Wan2.2 的 denoising loop，改动量最小，也和论文中对 Wan2.2 的实验路径一致。
 
+## 1.1 A100 40G 可运行性结论
+
+不是本文档里的所有命令都能在单张 A100 40G 上直接顺利运行。按当前代码状态和公开模型要求，可以分成三类：
+
+| 命令类型 | A100 40G 单卡结论 | 说明 |
+| --- | --- | --- |
+| MAGI-1 4.5B 下载、单样本 vanilla I2V、单视频 WMReward 打分 | 基本可运行 | MAGI-1 官方说明 4.5B 至少需要 24GB 显存；A100 40G 有余量。 |
+| MAGI-1 4.5B 批量 PhysicsIQ vanilla | 显存基本可运行，但需要数据集 | 需要先按 PhysicsIQ 官方方式准备 `PhysicsIQ/code/physics-IQ-benchmark`，否则会因输入图像/视频路径不存在失败。 |
+| MAGI-1 4.5B + VJEPA guidance | 有 OOM 风险 | 4.5B 本体能跑不代表同时放下 VJEPA guidance、视频中间张量和梯度图。A100 40G 建议先跑 `--guidance_scale 0` 的 vanilla smoke test，再尝试 guidance。 |
+| Wan2.2 A14B I2V/T2V 单卡生成 | 不建议在 A100 40G 上直接运行 | Wan2.2 A14B 官方单卡示例标注至少 80GB VRAM；A100 40G 应改用多卡 FSDP/量化/更小模型，或先使用 MAGI-1 4.5B 路线。 |
+| `generate_wan2_2.py`、`generator_i2v_wan2_2_multinode.py`、`generation/generate_i2v_wan2_2_multinode.sh` | 当前不可直接运行 | 这些是文档中描述的待新增/待改造入口，当前仓库尚未实现这些文件。 |
+
+因此，A100 40G 上推荐的实际顺序是：先跑 MAGI-1 4.5B vanilla 生成，再用 `compute_wmreward.py` 打分；批量复现优先使用 `vanilla` 或 `rejection`，不要第一步就跑 Wan2.2 A14B 或 MAGI-1 guidance。当前批量脚本默认已经改成 `vanilla`，如需尝试其他采样方式，用 `SAMPLE_METHODS_OVERRIDE` 显式覆盖。
+
 ## 2. MAGI-1 4.5B 轻量流程
 
 ### 步骤 1：初始化子模块
@@ -78,7 +92,8 @@ python generate_magi1.py \
   --prompt "A ball falls from the table onto the floor" \
   --init_image ./example/0001_switch-frames_anyFPS_perspective-left_trimmed-ball-and-block-fall.jpg \
   --output_path ./results/magi1_output.mp4 \
-  --mode i2v
+  --mode i2v \
+  --guidance_scale 0
 ```
 
 这一步做了什么：
@@ -122,11 +137,29 @@ bash generation/generate_i2v_magi1_multinode.sh
 - `rejection`：每个样本生成多个候选视频，用 VJEPA loss 打分，选 loss 最低的候选。
 - `guidance`：调用 MAGI-1 子模块中带 VJEPA guidance 的 pipeline，在 denoising 过程中直接使用 VJEPA 梯度。
 
-当前 shell 脚本默认使用 `guidance`，默认单卡运行 `4.5B_base`，并把输出放到 `generated_videos/<group>/MAGI-1-4.5B_base/` 下。论文原始 MAGI-1 结果使用 24B，因此 4.5B 版本属于轻量化复现，显存更友好但结果不能直接等同论文 24B 数字。
+当前 shell 脚本默认单卡运行 `4.5B_base` 和 `vanilla` 采样，并把输出放到 `generated_videos/<group>/MAGI-1-4.5B_base/` 下。运行前需要准备 PhysicsIQ 输入数据，否则会因为 `PhysicsIQ/code/physics-IQ-benchmark` 下的图像/视频不存在而失败。
+
+如果想在 A100 40G 上尝试 rejection，可以用：
+
+```bash
+SAMPLE_METHODS_OVERRIDE="rejection" REJECTION_SAMPLES=2 \
+  bash generation/generate_i2v_magi1_multinode.sh
+```
+
+如果想尝试 guidance，可以用：
+
+```bash
+SAMPLE_METHODS_OVERRIDE="guidance" \
+  bash generation/generate_i2v_magi1_multinode.sh
+```
+
+但 `guidance` 会额外加载 VJEPA 并保留梯度，中间显存显著更高，A100 40G 不能保证稳定。论文原始 MAGI-1 结果使用 24B，因此 4.5B 版本属于轻量化复现，显存更友好但结果不能直接等同论文 24B 数字。
 
 ## 3. 替换为 Wan2.2 后的推荐轻量流程
 
 ### 步骤 1：下载 Wan2.2 A14B Diffusers 权重
+
+注意：以下下载命令可以在 A100 40G 机器上执行，但下载完成不代表 A14B 生成命令能在单张 A100 40G 上跑通。Wan2.2 A14B 的官方单卡推理要求通常是 80GB 级显存。
 
 ```bash
 pip install "huggingface_hub[cli]"
@@ -177,7 +210,9 @@ pip install -U git+https://github.com/huggingface/diffusers
 
 ### 步骤 3：新增 Wan2.2 单视频生成入口
 
-```bash
+当前仓库还没有 `generate_wan2_2.py`，下面是目标接口示例，不是现有可直接运行命令；并且 A14B 单卡生成不适合 A100 40G。
+
+```text
 python generate_wan2_2.py \
   --model_path ../../models/Wan2.2-I2V-A14B-Diffusers \
   --prompt "A ball falls from the table onto the floor" \
@@ -214,7 +249,9 @@ python compute_wmreward.py \
 
 ### 步骤 5：用 Wan2.2 做 Best-of-N/rejection 轻量复现
 
-```bash
+当前仓库还没有 `generator_i2v_wan2_2_multinode.py`，下面是目标接口示例，不是现有可直接运行命令；A100 40G 单卡也不适合直接跑 Wan2.2 A14B 的 16 候选 BoN。
+
+```text
 python generator_i2v_wan2_2_multinode.py \
   --output_folder ./generated_videos/physics_iq/Wan2.2 \
   --batch_json ./prompts/physics_iq.json \
@@ -287,12 +324,13 @@ python generate_magi1.py \
   --prompt "..." \
   --init_image image.jpg \
   --output_path output.mp4 \
-  --mode i2v
+  --mode i2v \
+  --guidance_scale 0
 ```
 
-Wan2.2 目标入口：
+Wan2.2 目标入口，当前仓库尚未实现，且 A14B 单卡 A100 40G 不推荐直接运行：
 
-```bash
+```text
 python generate_wan2_2.py \
   --model_path ../../models/Wan2.2-I2V-A14B-Diffusers \
   --prompt "..." \
@@ -312,7 +350,7 @@ from inference.pipeline.pipeline_w_guidance import MagiPipeline
 
 Wan2.2 Diffusers pipeline 默认没有接入 WMReward guidance。轻量复现时应先把 `guidance` 改成不可用或退化为 `rejection`。也就是说：
 
-```bash
+```text
 --sampling_method rejection
 ```
 
@@ -547,7 +585,8 @@ python generate_magi1.py \
   --prompt "A ball falls from the table onto the floor" \
   --init_image ./example/0001_switch-frames_anyFPS_perspective-left_trimmed-ball-and-block-fall.jpg \
   --output_path ./results/magi1_4_5b_output.mp4 \
-  --mode i2v
+  --mode i2v \
+  --guidance_scale 0
 
 python compute_wmreward.py \
   --video_path ./results/magi1_4_5b_output.mp4
@@ -557,7 +596,9 @@ python compute_wmreward.py \
 
 ### Wan2.2 最小可行版本
 
-```bash
+以下是目标流程，不是当前 A100 40G 单卡可直接执行流程；原因是 `generate_wan2_2.py` 尚未实现，且 Wan2.2 A14B 单卡显存需求超过 40G。
+
+```text
 python -u downloader/download_wan2_2_a14b_diffusers.py --variant i2v
 python generate_wan2_2.py --model_path ../../models/Wan2.2-I2V-A14B-Diffusers ...
 python compute_wmreward.py --video_path ./results/wan2_2_output.mp4
@@ -567,7 +608,9 @@ python compute_wmreward.py --video_path ./results/wan2_2_output.mp4
 
 ### 轻量论文复现版本
 
-```bash
+以下脚本尚未实现；A100 40G 上应先使用 MAGI-1 4.5B 的 `vanilla` / `rejection` 路线。
+
+```text
 bash generation/generate_i2v_wan2_2_multinode.sh
 ```
 

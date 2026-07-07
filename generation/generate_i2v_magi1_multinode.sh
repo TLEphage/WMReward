@@ -74,11 +74,17 @@ BATCH_JSON_LIST=(
 BASEDIR="./physicsiq_benchmark/code"
 OUTPUT_FOLDER="./generated_videos"
 
-# SAMPLE_METHODS=("guidance" "vanilla")
-SAMPLE_METHODS=("guidance")
+# A100 40G friendly default. Override, for example:
+#   SAMPLE_METHODS_OVERRIDE="rejection" bash generation/generate_i2v_magi1_multinode.sh
+#   SAMPLE_METHODS_OVERRIDE="guidance" bash generation/generate_i2v_magi1_multinode.sh
+if [[ -n "${SAMPLE_METHODS_OVERRIDE:-}" ]]; then
+    read -r -a SAMPLE_METHODS <<< "$SAMPLE_METHODS_OVERRIDE"
+else
+    SAMPLE_METHODS=("vanilla")
+fi
 NUM_SAMPLING_STEPS="50"
 NUM_FRAMES="49"
-REJECTION_SAMPLES="10"  # Number of candidates to generate for rejection sampling
+REJECTION_SAMPLES="${REJECTION_SAMPLES:-10}"  # Number of candidates to generate for rejection sampling
 
 # I2V conditioning comes from JSON (input_video or image); no static INIT_IMAGE here
 

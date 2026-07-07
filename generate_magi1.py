@@ -42,6 +42,13 @@ os.environ.setdefault("PAD_DURATION", "1")
 os.environ.setdefault("OFFLOAD_T5_CACHE", "true")
 os.environ.setdefault("OFFLOAD_VAE_CACHE", "true")
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+os.environ.setdefault("MASTER_ADDR", "localhost")
+os.environ.setdefault("MASTER_PORT", "6009")
+os.environ.setdefault("GPUS_PER_NODE", "1")
+os.environ.setdefault("NNODES", "1")
+os.environ.setdefault("WORLD_SIZE", "1")
+os.environ.setdefault("RANK", "0")
+os.environ.setdefault("LOCAL_RANK", "0")
 
 if MAGI1_PATH not in sys.path:
     sys.path.insert(0, MAGI1_PATH)
