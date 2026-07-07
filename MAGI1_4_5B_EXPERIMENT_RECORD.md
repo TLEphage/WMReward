@@ -182,6 +182,62 @@ downloads/
 du -sh downloads/4.5B_base downloads/vae downloads/t5_pretrained
 ```
 
+### 3.3 下载 VJEPA-2 vitg 权重
+
+推荐使用 `aria2c` 多连接下载：
+
+```bash
+cd /root/physics-consistency-eval/WMReward
+conda activate wmreward1
+
+mkdir -p checkpoints
+
+apt-get update
+apt-get install -y aria2
+
+aria2c \
+  -c \
+  -x 16 \
+  -s 16 \
+  -k 4M \
+  --max-tries=0 \
+  --retry-wait=10 \
+  --timeout=60 \
+  --connect-timeout=30 \
+  -d checkpoints \
+  -o vitg.pt \
+  https://dl.fbaipublicfiles.com/vjepa2/vitg.pt
+```
+
+如果不安装 `aria2c`，也可以使用仓库脚本下载：
+
+```bash
+python -u downloader/download_vjepa2.py --model vitg
+```
+
+如使用旧版 `compute_wmreward.py`，可将下载好的 checkpoint 软链接到 torch hub 缓存目录：
+
+```bash
+mkdir -p /root/.cache/torch/hub/checkpoints
+ln -sf /root/physics-consistency-eval/WMReward/checkpoints/vitg.pt \
+  /root/.cache/torch/hub/checkpoints/vitg.pt
+```
+
+记录：
+
+| 指标 | 数值 |
+| --- | --- |
+| 下载命令 | `aria2c -c -x 16 -s 16 -k 4M ... https://dl.fbaipublicfiles.com/vjepa2/vitg.pt` |
+| VJEPA checkpoint | `checkpoints/vitg.pt` |
+| checkpoint 大小 | `约 15.3 GB` |
+| 下载总耗时 | `[待填]` |
+
+查看命令：
+
+```bash
+ls -lh checkpoints/vitg.pt
+```
+
 ## 4. 单样本 MAGI-1 4.5B I2V 生成
 
 ### 4.1 运行命令
@@ -251,7 +307,7 @@ tail -f logs/generate_magi1_4_5b_i2v.log
 
 ## 5. 单视频 WMReward 计算
 
-### 5.1 下载 VJEPA-2 vitg 权重
+### 5.1 检查 VJEPA-2 vitg 权重
 
 运行命令：
 
@@ -259,10 +315,10 @@ tail -f logs/generate_magi1_4_5b_i2v.log
 cd /root/physics-consistency-eval/WMReward
 conda activate wmreward1
 
-python -u downloader/download_vjepa2.py --model vitg
+ls -lh checkpoints/vitg.pt
 ```
 
-该命令将 VJEPA-2 `vitg` 权重下载到：
+VJEPA-2 `vitg` 权重路径：
 
 ```text
 checkpoints/vitg.pt
@@ -274,13 +330,6 @@ checkpoints/vitg.pt
 | --- | --- |
 | VJEPA checkpoint | `checkpoints/vitg.pt` |
 | checkpoint 大小 | `约 15.3 GB` |
-| 下载总耗时 | `[待填]` |
-
-查看命令：
-
-```bash
-ls -lh checkpoints/vitg.pt
-```
 
 ### 5.2 运行命令
 
