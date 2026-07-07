@@ -595,15 +595,38 @@ def generate_videos(pipe, args, init_frame, prompts, negative_prompt, experiment
     else:
         print(f"[{experiment_name}] Experiment completed! Results saved to: {experiment_folder}")
 
+def _resolve_existing_input_path(path: str | None, base_dir: str | None) -> str | None:
+    if not path:
+        return None
+    if os.path.isabs(path):
+        return path
+
+    candidates = []
+    if base_dir:
+        candidates.append(os.path.join(base_dir, path))
+    candidates.extend([
+        path,
+        os.path.join("PhysicsIQ/code", path),
+        os.path.join("PhysicsIQ/code/physics-IQ-benchmark", path),
+    ])
+
+    seen = set()
+    for candidate in candidates:
+        normalized = os.path.normpath(candidate)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        if os.path.exists(normalized):
+            return normalized
+
+    return os.path.normpath(candidates[0])
+
+
 def resolve_paths(input_video, input_image, output_video, base_dir):
     """Resolve input/output paths for Physics-IQ dataset."""
-    # Physics-IQ: Use absolute paths, ignore base_dir for inputs
-    input_video_abs = os.path.join("PhysicsIQ/code/physics-IQ-benchmark", input_video) if input_video else None
-    input_image_abs = os.path.join("PhysicsIQ/code/physics-IQ-benchmark", input_image) if input_image else None
-    # Output can still be relative to base_dir
-    output_video_abs = output_video
-
-    return input_video_abs, input_image_abs, output_video_abs
+    input_video_abs = _resolve_existing_input_path(input_video, base_dir)
+    input_image_abs = _resolve_existing_input_path(input_image, base_dir)
+    return input_video_abs, input_image_abs, output_video
 
 def chunk_prompts(prompts, num_chunks, chunk_idx):
     """Divide the prompts into chunks and return the chunk corresponding to the given index."""

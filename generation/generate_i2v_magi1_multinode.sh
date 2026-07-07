@@ -71,7 +71,7 @@ BATCH_JSON_LIST=(
     # Physics-IQ dataset
     "./prompts/physics_iq.json"
 )
-BASEDIR="./physicsiq_benchmark/code"
+BASEDIR="${BASEDIR:-./PhysicsIQ/code}"
 OUTPUT_FOLDER="./generated_videos"
 
 # A100 40G friendly default. Override, for example:
