@@ -11,15 +11,16 @@ tail -f downloader/download_magi1_4_5b.log
 watch -n 5 'du -sh downloads/4.5B_base downloads/vae downloads/t5_pretrained 2>/dev/null'
 """
 
-import subprocess
+import subprocess, os
 from pathlib import Path
 
 from huggingface_hub import HfApi
 
 
 REPO_ID = "sand-ai/MAGI-1"
-BASE_URL = "https://huggingface.co"
-# BASE_URL = "https://hf-mirror.com"
+# BASE_URL = "https://huggingface.co"
+BASE_URL = "https://hf-mirror.com"
+os.environ["HF_ENDPOINT"] = BASE_URL
 OUT_DIR = Path("downloads")
 INCLUDE_PREFIXES = (
     "ckpt/magi/4.5B_base/",
@@ -40,6 +41,7 @@ def local_path(file_path: str) -> Path:
 
 def download_file(file_path: str) -> None:
     final_path = local_path(file_path)
+    part_path = final_path.with_suffix(final_path.suffix + ".part")
     final_path.parent.mkdir(parents=True, exist_ok=True)
 
     url = f"{BASE_URL}/{REPO_ID}/resolve/main/{file_path}"
@@ -61,23 +63,36 @@ def download_file(file_path: str) -> None:
             "--connect-timeout", "60",
             "--max-time", "0",
             "-C", "-",
-            "-o", str(final_path),
+            "-o", str(part_path),
             url,
         ],
         check=True,
     )
 
+    part_path.rename(final_path)
     print(f"[OK] {file_path}", flush=True)
 
+def list_files_with_retry() -> list[str]:
+    api = HfApi(endpoint=BASE_URL)
+
+    for attempt in range(1, 1000):
+        try:
+            files = [
+                file_path
+                for file_path in api.list_repo_files(REPO_ID)
+                if file_path.startswith(INCLUDE_PREFIXES)
+            ]
+            return files
+        except Exception as e:
+            print(f"[LIST-RETRY {attempt}] {repr(e)}", flush=True)
+            time.sleep(10)
+
+    raise RuntimeError("list_repo_files failed too many times")
 
 def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    files = [
-        file_path
-        for file_path in HfApi().list_repo_files(REPO_ID)
-        if file_path.startswith(INCLUDE_PREFIXES)
-    ]
+    files = list_files_with_retry()
     print(f"共 {len(files)} 个文件", flush=True)
 
     for file_path in files:

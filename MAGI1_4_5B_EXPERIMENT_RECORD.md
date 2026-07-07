@@ -49,7 +49,7 @@ conda activate wmreward1
 
 | 指标 | 数值 |
 | --- | --- |
-| Python 版本 | `[待填]` |
+| Python 版本 | `3.10` |
 | Conda 环境名 | `wmreward1` |
 
 ### 2.2 安装推理依赖
@@ -70,10 +70,10 @@ pip install flashinfer-python==0.2.0.post2 \
 
 | 指标 | 数值 |
 | --- | --- |
-| PyTorch 版本 | `[待填]` |
-| PyTorch CUDA 版本 | `[待填]` |
+| PyTorch 版本 | `2.4.0+cu124` |
+| PyTorch CUDA 版本 | `12.4` |
 | NVIDIA Driver | `[待填]` |
-| `nvidia-smi` CUDA Version | `[待填]` |
+| `nvidia-smi` CUDA Version | `12.8` |
 
 检查命令：
 
@@ -171,7 +171,7 @@ downloads/
 
 | 指标 | 数值 |
 | --- | --- |
-| 下载总耗时 | `[待填]` |
+| 下载总耗时 | `2 小时左右` |
 | `downloads/4.5B_base` 大小 | `[待填]` |
 | `downloads/vae` 大小 | `[待填]` |
 | `downloads/t5_pretrained` 大小 | `[待填]` |
@@ -230,7 +230,7 @@ ln -sf /root/physics-consistency-eval/WMReward/checkpoints/vitg.pt \
 | 下载命令 | `aria2c -c -x 16 -s 16 -k 4M ... https://dl.fbaipublicfiles.com/vjepa2/vitg.pt` |
 | VJEPA checkpoint | `checkpoints/vitg.pt` |
 | checkpoint 大小 | `约 15.3 GB` |
-| 下载总耗时 | `[待填]` |
+| 下载总耗时 | `20 分钟左右` |
 
 查看命令：
 
@@ -285,11 +285,8 @@ python generate_magi1.py \
 | 输入图像 | `./example/0001_switch-frames_anyFPS_perspective-left_trimmed-ball-and-block-fall.jpg` |
 | Prompt | `A ball falls from the table onto the floor` |
 | 输出视频 | `./results/magi1_output.mp4` |
-| 推理进度日志 | `InferBatch 0: 100% \| 5/5 [38:33<00:00, 462.75s/it]` |
-| 单命令总运行时间 | `[待填：记录完整 wall time；当前已观测推理阶段 38 分 33 秒]` |
-| 峰值显存 | `[待填：nvidia-smi 记录，例如 xx GB]` |
-| 平均 GPU 利用率 | `[待填：例如 60%-90%]` |
-| 输出视频大小 | `[待填：ls -lh results/magi1_output.mp4]` |
+| 单命令总运行时间 | `38 分钟左右` |
+| 峰值显存 | `12GB 左右` |
 
 查看输出：
 
@@ -362,10 +359,10 @@ python compute_wmreward.py \
 | window size | `16` |
 | context frames | `8` |
 | stride | `8` |
-| 单命令总运行时间 | `[待填]` |
-| 峰值显存 | `[待填]` |
-| VJEPA Surprise Score | `[待填]` |
-| VJEPA Similarity Score | `[待填]` |
+| 单命令总运行时间 | `1 分钟左右` |
+| 峰值显存 | `5GB 左右` |
+| VJEPA Surprise Score | `0.397691` |
+| VJEPA Similarity Score | `0.602309` |
 
 ## 6. 批量 vanilla 复现
 
