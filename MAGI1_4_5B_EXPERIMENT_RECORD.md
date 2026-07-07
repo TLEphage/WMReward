@@ -425,7 +425,7 @@ BATCH_MAX_ENTRIES=8 \
 NUM_FRAMES=49 \
 VIDEO_HEIGHT=480 \
 VIDEO_WIDTH=720 \
-NUM_SAMPLING_STEPS=50 \
+NUM_SAMPLING_STEPS=48 \
 bash generation/generate_i2v_magi1_multinode.sh \
   2>&1 | tee logs/generate_i2v_magi1_4_5b_vanilla_batch_5h.log
 ```
@@ -475,7 +475,7 @@ BATCH_MAX_ENTRIES=3 \
 NUM_FRAMES=49 \
 VIDEO_HEIGHT=480 \
 VIDEO_WIDTH=720 \
-NUM_SAMPLING_STEPS=50 \
+NUM_SAMPLING_STEPS=48 \
 bash generation/generate_i2v_magi1_multinode.sh \
   2>&1 | tee logs/generate_i2v_magi1_4_5b_rejection_n2_5h.log
 ```
@@ -532,9 +532,11 @@ BATCH_MAX_ENTRIES = 1
 NUM_FRAMES = 49
 VIDEO_HEIGHT = 480
 VIDEO_WIDTH = 720
-NUM_SAMPLING_STEPS = 50
+NUM_SAMPLING_STEPS = 48
 SEED = 42
 ```
+
+注意：MAGI-1 当前配置的 `noise2clean_kvrange` 长度为 4，`NUM_SAMPLING_STEPS` 必须能被 4 整除；轻量实验使用 `48`，不要使用 `50`。
 
 对比指标：
 
@@ -589,7 +591,7 @@ BATCH_MAX_ENTRIES=1 \
 NUM_FRAMES=49 \
 VIDEO_HEIGHT=480 \
 VIDEO_WIDTH=720 \
-NUM_SAMPLING_STEPS=50 \
+NUM_SAMPLING_STEPS=48 \
 SAMPLE_METHODS_OVERRIDE="vanilla" \
 bash generation/generate_i2v_magi1_multinode.sh \
   2>&1 | tee logs/guidance_compare_vanilla_1sample.log
@@ -598,7 +600,7 @@ bash generation/generate_i2v_magi1_multinode.sh \
 输出视频路径：
 
 ```text
-generated_videos/physics_iq/MAGI-1-4.5B_base/vanilla_v2_f49_s50_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4
+generated_videos/physics_iq/MAGI-1-4.5B_base/vanilla_v2_f49_s48_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4
 ```
 
 ### 8.4 运行 guidance
@@ -615,7 +617,7 @@ BATCH_MAX_ENTRIES=1 \
 NUM_FRAMES=49 \
 VIDEO_HEIGHT=480 \
 VIDEO_WIDTH=720 \
-NUM_SAMPLING_STEPS=50 \
+NUM_SAMPLING_STEPS=48 \
 SAMPLE_METHODS_OVERRIDE="guidance" \
 GUIDANCE_SCALE=0.001 \
 GUIDANCE_FREQUENCY=5 \
@@ -627,7 +629,7 @@ bash generation/generate_i2v_magi1_multinode.sh \
 输出视频路径：
 
 ```text
-generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_v2_f49_s50_gs0.001_gf5_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4
+generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_v2_f49_s48_gs0.001_gf5_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4
 ```
 
 如果保守配置能跑通，并且显存还有余量，可以尝试更高频率 guidance：
@@ -638,7 +640,7 @@ BATCH_MAX_ENTRIES=1 \
 NUM_FRAMES=49 \
 VIDEO_HEIGHT=480 \
 VIDEO_WIDTH=720 \
-NUM_SAMPLING_STEPS=50 \
+NUM_SAMPLING_STEPS=48 \
 SAMPLE_METHODS_OVERRIDE="guidance" \
 GUIDANCE_SCALE=0.001 \
 GUIDANCE_FREQUENCY=1 \
@@ -651,7 +653,7 @@ bash generation/generate_i2v_magi1_multinode.sh \
 
 | 配置 | 样本数 | 预计耗时 | 风险 |
 | --- | --- | --- | --- |
-| vanilla, 49 帧, 480x720, 50 steps | 1 | `10-20 分钟` | 低 |
+| vanilla, 49 帧, 480x720, 48 steps | 1 | `10-20 分钟` | 低 |
 | guidance, `gf=5` | 1 | `40-90 分钟` | 中，有 OOM 风险 |
 | guidance, `gf=1` | 1 | `1.5-3 小时` | 高，A100 40G 可能 OOM |
 | guidance, `BATCH_MAX_ENTRIES=2` | 2 | 约为单条 2 倍 | 高 |
@@ -668,7 +670,7 @@ vanilla 输出打分：
 
 ```bash
 python compute_wmreward.py \
-  --video_path generated_videos/physics_iq/MAGI-1-4.5B_base/vanilla_v2_f49_s50_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4 \
+  --video_path generated_videos/physics_iq/MAGI-1-4.5B_base/vanilla_v2_f49_s48_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4 \
   --model vitg \
   --window_size 16 \
   --context_frames 8 \
@@ -680,7 +682,7 @@ guidance `gf=5` 输出打分：
 
 ```bash
 python compute_wmreward.py \
-  --video_path generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_v2_f49_s50_gs0.001_gf5_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4 \
+  --video_path generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_v2_f49_s48_gs0.001_gf5_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4 \
   --model vitg \
   --window_size 16 \
   --context_frames 8 \
@@ -692,7 +694,7 @@ guidance `gf=1` 输出打分：
 
 ```bash
 python compute_wmreward.py \
-  --video_path generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_v2_f49_s50_gs0.001_gf1_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4 \
+  --video_path generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_v2_f49_s48_gs0.001_gf1_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4 \
   --model vitg \
   --window_size 16 \
   --context_frames 8 \

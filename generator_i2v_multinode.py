@@ -283,6 +283,13 @@ def init_pipeline(args):
     pipeline = MagiPipeline(args.config_file)
     runtime_config = getattr(pipeline.config, "runtime_config", None)
     if runtime_config is not None:
+        noise2clean_kvrange = getattr(runtime_config, "noise2clean_kvrange", None)
+        if noise2clean_kvrange and int(args.num_inference_steps) % len(noise2clean_kvrange) != 0:
+            raise ValueError(
+                "--num_inference_steps must be divisible by "
+                f"len(noise2clean_kvrange)={len(noise2clean_kvrange)} for MAGI-1. "
+                f"Got {args.num_inference_steps}. Try 48, 52, or 64."
+            )
         runtime_config.num_frames = int(args.num_frames)
         runtime_config.video_size_h = int(args.height)
         runtime_config.video_size_w = int(args.width)
