@@ -251,7 +251,38 @@ tail -f logs/generate_magi1_4_5b_i2v.log
 
 ## 5. 单视频 WMReward 计算
 
-### 5.1 运行命令
+### 5.1 下载 VJEPA-2 vitg 权重
+
+运行命令：
+
+```bash
+cd /root/physics-consistency-eval/WMReward
+conda activate wmreward1
+
+python -u downloader/download_vjepa2.py --model vitg
+```
+
+该命令将 VJEPA-2 `vitg` 权重下载到：
+
+```text
+checkpoints/vitg.pt
+```
+
+记录：
+
+| 指标 | 数值 |
+| --- | --- |
+| VJEPA checkpoint | `checkpoints/vitg.pt` |
+| checkpoint 大小 | `约 15.3 GB` |
+| 下载总耗时 | `[待填]` |
+
+查看命令：
+
+```bash
+ls -lh checkpoints/vitg.pt
+```
+
+### 5.2 运行命令
 
 ```bash
 cd /root/physics-consistency-eval/WMReward
@@ -269,11 +300,11 @@ python compute_wmreward.py \
 该命令执行内容：
 
 1. 读取 `./results/magi1_output.mp4`。
-2. 加载 VJEPA-2 `vitg`。
+2. 加载本地 VJEPA-2 `vitg` checkpoint：`checkpoints/vitg.pt`。
 3. 以 16 帧窗口滑动计算 VJEPA surprise/loss。
 4. 输出 `VJEPA Surprise Score` 和 `VJEPA Similarity Score`。
 
-### 5.2 运行记录
+### 5.3 运行记录
 
 | 指标 | 数值 |
 | --- | --- |

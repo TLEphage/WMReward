@@ -12,18 +12,52 @@ Usage:
 """
 
 import copy
+import os
 import torch
 import argparse
+from pathlib import Path
 from torchvision.transforms.functional import resize
 from utils import (
     compute_vjepa_loss_sliding_window,
     get_video,
+    load_vjepa_model_source,
 )
+
+VJEPA_BASE_URL = "https://dl.fbaipublicfiles.com/vjepa2"
+VJEPA_CHECKPOINT_FILES = {
+    "vith": "vith.pt",
+    "vitg": "vitg.pt",
+    "vitg384": "vitg-384.pt",
+    "vitgac": "vjepa2-ac-vitg.pt",
+}
+
+
+def _local_vjepa_checkpoint(model_name: str) -> Path:
+    checkpoint_dir = Path(os.environ.get("VJEPA_CHECKPOINT_DIR", "./checkpoints"))
+    return checkpoint_dir / VJEPA_CHECKPOINT_FILES[model_name]
+
+
+def _patch_torchhub_vjepa_url() -> None:
+    """Fix cached VJEPA2 hub code if it points to the localhost test server."""
+    hub_dir = Path(torch.hub.get_dir())
+    for backbones_py in hub_dir.glob("facebookresearch_vjepa2_*/src/hub/backbones.py"):
+        text = backbones_py.read_text()
+        patched = text.replace("http://localhost:8300", VJEPA_BASE_URL)
+        if patched != text:
+            backbones_py.write_text(patched)
+            print(f"Patched VJEPA torch.hub checkpoint URL in {backbones_py}")
 
 
 def load_vjepa_models(model_name="vitg"):
     """Load VJEPA models from torchhub."""
     img_size = 384 if "384" in model_name else 256
+
+    checkpoint_path = _local_vjepa_checkpoint(model_name)
+    if checkpoint_path.exists():
+        print(f"Loading VJEPA checkpoint from local path: {checkpoint_path}")
+        return load_vjepa_model_source(model_name)
+
+    _patch_torchhub_vjepa_url()
 
     if model_name == "vith":
         encoder, predictor = torch.hub.load("facebookresearch/vjepa2", "vjepa2_vit_huge")
@@ -31,6 +65,8 @@ def load_vjepa_models(model_name="vitg"):
         encoder, predictor = torch.hub.load("facebookresearch/vjepa2", "vjepa2_vit_giant")
     elif model_name == "vitg384":
         encoder, predictor = torch.hub.load("facebookresearch/vjepa2", "vjepa2_vit_giant_384")
+    elif model_name == "vitgac":
+        encoder, predictor = torch.hub.load("facebookresearch/vjepa2", "vjepa2_ac_vit_giant")
     else:
         raise ValueError(f"Unknown model: {model_name}")
 
