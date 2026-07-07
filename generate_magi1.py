@@ -13,6 +13,9 @@ This is the main quick-start script for video generation using the MAGI-1 submod
 import os
 import sys
 import argparse
+import shutil
+import subprocess
+from pathlib import Path
 
 # Add MAGI-1 submodule to path
 MAGI1_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "MAGI-1")
@@ -34,6 +37,43 @@ def ensure_magi1_submodule() -> None:
             "MAGI-1 submodule not found. Please initialize it with:\n"
             "  git submodule update --init --recursive"
         )
+
+
+def ensure_video_output_path(output_path: str) -> None:
+    output_parent = Path(output_path).expanduser().resolve().parent
+    output_parent.mkdir(parents=True, exist_ok=True)
+
+    if shutil.which("ffmpeg") is None:
+        raise RuntimeError(
+            "ffmpeg executable was not found. Install it with:\n"
+            "  apt-get install -y ffmpeg\n"
+            "or:\n"
+            "  conda install -c conda-forge ffmpeg -y"
+        )
+
+    test_path = output_parent / ".ffmpeg_write_test.mp4"
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        "color=c=black:s=16x16:d=0.04:r=24",
+        "-frames:v",
+        "1",
+        str(test_path),
+    ]
+    try:
+        result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    finally:
+        test_path.unlink(missing_ok=True)
+
+    if result.returncode != 0:
+        stderr = result.stderr.strip() or result.stdout.strip() or "no ffmpeg stderr captured"
+        raise RuntimeError(f"ffmpeg cannot write mp4 files to {output_parent}:\n{stderr}")
 
 # Set SPECIAL_TOKEN_PATH for MAGI-1 if not already set
 os.environ.setdefault("SPECIAL_TOKEN_PATH", os.path.join(MAGI1_PATH, "example/assets/special_tokens.npz"))
@@ -86,6 +126,7 @@ def main():
     args = parser.parse_args()
     args.config_file = args.config_file or default_magi1_config(args.magi_model_variant)
     ensure_magi1_submodule()
+    ensure_video_output_path(args.output_path)
 
     # Import MAGI-1 pipeline (after sys.path modification). The guidance
     # pipeline eagerly loads V-JEPA, so use the vanilla pipeline for smoke tests.
