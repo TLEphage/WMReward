@@ -274,13 +274,17 @@ def load_first_frame(image_path: str | None, video_path: str | None) -> Image.Im
     return Image.fromarray(frame_rgb)
 
 def init_pipeline(args):
-    """Initialize the MAGI-1 pipeline with VJEPA guidance support."""
-    from inference.pipeline.pipeline_w_guidance import MagiPipeline
+    """Initialize the MAGI-1 pipeline."""
+    if args.sampling_method == "guidance":
+        from inference.pipeline.pipeline_w_guidance import MagiPipeline
+    else:
+        from inference.pipeline.pipeline import MagiPipeline
 
     pipeline = MagiPipeline(args.config_file)
-    pipeline.guidance_scale = getattr(args, "guidance_scale", pipeline.guidance_scale)
-    pipeline.guidance_frequency = getattr(args, "guidance_frequency", pipeline.guidance_frequency)
-    pipeline.vjepa_type = normalize_vjepa_variant(args.vjepa_type or args.vjepa_variant)
+    if args.sampling_method == "guidance":
+        pipeline.guidance_scale = getattr(args, "guidance_scale", pipeline.guidance_scale)
+        pipeline.guidance_frequency = getattr(args, "guidance_frequency", pipeline.guidance_frequency)
+        pipeline.vjepa_type = normalize_vjepa_variant(args.vjepa_type or args.vjepa_variant)
     return pipeline
 
 def init_vjepa_models(args):

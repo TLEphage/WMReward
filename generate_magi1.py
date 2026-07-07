@@ -87,14 +87,19 @@ def main():
     args.config_file = args.config_file or default_magi1_config(args.magi_model_variant)
     ensure_magi1_submodule()
 
-    # Import MAGI-1 pipeline (after sys.path modification)
-    from inference.pipeline.pipeline_w_guidance import MagiPipeline
+    # Import MAGI-1 pipeline (after sys.path modification). The guidance
+    # pipeline eagerly loads V-JEPA, so use the vanilla pipeline for smoke tests.
+    if args.guidance_scale > 0:
+        from inference.pipeline.pipeline_w_guidance import MagiPipeline
+    else:
+        from inference.pipeline.pipeline import MagiPipeline
 
-    # Initialize MAGI-1 pipeline with guidance support
+    # Initialize MAGI-1 pipeline
     pipeline = MagiPipeline(args.config_file)
-    pipeline.guidance_scale = args.guidance_scale
-    pipeline.guidance_frequency = args.guidance_frequency
-    pipeline.vjepa_type = args.vjepa_type
+    if args.guidance_scale > 0:
+        pipeline.guidance_scale = args.guidance_scale
+        pipeline.guidance_frequency = args.guidance_frequency
+        pipeline.vjepa_type = args.vjepa_type
 
     # Run the appropriate mode
     if args.mode == "t2v":

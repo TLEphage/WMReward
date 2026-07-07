@@ -23,7 +23,7 @@ WMReward 的目标不是重新训练视频生成模型，而是在推理阶段�
 | --- | --- | --- |
 | MAGI-1 4.5B 下载、单样本 vanilla I2V、单视频 WMReward 打分 | 基本可运行 | MAGI-1 官方说明 4.5B 至少需要 24GB 显存；A100 40G 有余量。 |
 | MAGI-1 4.5B 批量 PhysicsIQ vanilla | 显存基本可运行，但需要数据集 | 需要先按 PhysicsIQ 官方方式准备 `PhysicsIQ/code/physics-IQ-benchmark`，否则会因输入图像/视频路径不存在失败。 |
-| MAGI-1 4.5B + VJEPA guidance | 有 OOM 风险 | 4.5B 本体能跑不代表同时放下 VJEPA guidance、视频中间张量和梯度图。A100 40G 建议先跑 `--guidance_scale 0` 的 vanilla smoke test，再尝试 guidance。 |
+| MAGI-1 4.5B + VJEPA guidance | 有 OOM 和网络下载风险 | 4.5B 本体能跑不代表同时放下 VJEPA guidance、视频中间张量和梯度图。A100 40G 建议先跑 `--guidance_scale 0` 的 vanilla smoke test；guidance 会通过 `torch.hub` 下载/加载 VJEPA。 |
 | Wan2.2 A14B I2V/T2V 单卡生成 | 不建议在 A100 40G 上直接运行 | Wan2.2 A14B 官方单卡示例标注至少 80GB VRAM；A100 40G 应改用多卡 FSDP/量化/更小模型，或先使用 MAGI-1 4.5B 路线。 |
 | `generate_wan2_2.py`、`generator_i2v_wan2_2_multinode.py`、`generation/generate_i2v_wan2_2_multinode.sh` | 当前不可直接运行 | 这些是文档中描述的待新增/待改造入口，当前仓库尚未实现这些文件。 |
 
@@ -98,7 +98,7 @@ python generate_magi1.py \
 
 这一步做了什么：
 
-调用 MAGI-1 4.5B 的 image-to-video pipeline，用文本 prompt 和首帧图像生成视频。`generate_magi1.py` 会把 `MAGI-1` 子模块加入 `sys.path`，然后创建 `MagiPipeline`，最后根据 `--mode` 运行 T2V、I2V 或 V2V。
+调用 MAGI-1 4.5B 的 image-to-video pipeline，用文本 prompt 和首帧图像生成视频。`generate_magi1.py` 会把 `MAGI-1` 子模块加入 `sys.path`，然后创建 `MagiPipeline`，最后根据 `--mode` 运行 T2V、I2V 或 V2V。`--guidance_scale 0` 会使用 MAGI-1 原生 pipeline，不会下载或加载 VJEPA；只有 `--guidance_scale > 0` 才会走 `pipeline_w_guidance`。
 
 当前代码已经把 `--config_file` 改成可选参数；如果不传，它默认使用：
 
