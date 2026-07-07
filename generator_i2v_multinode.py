@@ -281,11 +281,33 @@ def init_pipeline(args):
         from inference.pipeline.pipeline import MagiPipeline
 
     pipeline = MagiPipeline(args.config_file)
+    runtime_config = getattr(pipeline.config, "runtime_config", None)
+    if runtime_config is not None:
+        runtime_config.num_frames = int(args.num_frames)
+        runtime_config.video_size_h = int(args.height)
+        runtime_config.video_size_w = int(args.width)
+        runtime_config.num_steps = int(args.num_inference_steps)
     if args.sampling_method == "guidance":
         pipeline.guidance_scale = getattr(args, "guidance_scale", pipeline.guidance_scale)
         pipeline.guidance_frequency = getattr(args, "guidance_frequency", pipeline.guidance_frequency)
         pipeline.vjepa_type = normalize_vjepa_variant(args.vjepa_type or args.vjepa_variant)
     return pipeline
+
+
+def load_batch_entries(batch_json: str) -> list[dict]:
+    """Load JSON entries, allowing repository header comments that start with #."""
+    with open(batch_json, "r") as f:
+        text = "".join(line for line in f if not line.lstrip().startswith("#"))
+    return json.loads(text)
+
+
+def select_entry_range(entries: list[dict], start_idx: int, max_entries: int | None) -> list[dict]:
+    if start_idx < 0:
+        raise ValueError("--start_idx must be >= 0")
+    selected = entries[start_idx:]
+    if max_entries is not None and max_entries > 0:
+        selected = selected[:max_entries]
+    return selected
 
 def init_vjepa_models(args):
     """Initialize V-JEPA models for rejection sampling evaluation."""
@@ -612,6 +634,8 @@ def main():
     parser.add_argument('--output_filename', type=str, default=None, help='Output filename (e.g., name.mp4) to use under the experiment folder when using a single prompt.')
     parser.add_argument('--config_version', type=str, default='v2', help='Configuration version tag for experiment naming and tracking.')
     parser.add_argument('--batch_json', type=str, default=None, help='Optional: JSON file with list of {input_video|input_image, prompt, output_video} entries to process. Entries will be sharded across GPUs by index modulo num_gpus.')
+    parser.add_argument('--start_idx', type=int, default=0, help='First batch_json entry index to process before GPU sharding.')
+    parser.add_argument('--max_entries', type=int, default=0, help='Maximum number of batch_json entries to process before GPU sharding. Use 0 for no limit.')
     parser.add_argument('--base_dir', type=str, default=None, help='Optional: Base directory to prepend to input/output paths in --batch_json.')
     parser.add_argument('--dataset_mode', type=str, default='physics_iq', choices=['physics_iq'],
                        help='Dataset mode for path resolution.')
@@ -709,11 +733,12 @@ def main():
 
 
     # Batch JSON mode: load tasks, shard by index, and process this shard
-    with open(args.batch_json, 'r') as f:
-        entries = json.load(f)
+    entries = load_batch_entries(args.batch_json)
+    entries = select_entry_range(entries, args.start_idx, args.max_entries)
 
     base_dir = args.base_dir
     print("Using Physics-IQ mode: absolute input paths, relative output paths")
+    print(f"Selected {len(entries)} entries from {args.batch_json} (start_idx={args.start_idx}, max_entries={args.max_entries})")
 
     # Use same chunking mechanism as vanilla/guidance methods for consistent ordering
     chunked_entries = chunk_prompts(entries, args.num_gpus, args.gpu_idx)

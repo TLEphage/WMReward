@@ -229,6 +229,43 @@ def load_vjepa_models_torchhub(model):
     Returns:
         tuple: (encoder, target_encoder, predictor) models
     """
+    normalized_model = {
+        "vith": "vith",
+        "vit_huge": "vith",
+        "vitg": "vitg",
+        "vit_giant": "vitg",
+        "vitg384": "vitg384",
+        "vit_giant_384": "vitg384",
+        "vitgac": "vitgac",
+        "vit_giant_ac": "vitgac",
+    }.get(model)
+    checkpoint_files = {
+        "vith": "vith.pt",
+        "vitg": "vitg.pt",
+        "vitg384": "vitg-384.pt",
+        "vitgac": "vjepa2-ac-vitg.pt",
+    }
+    checkpoint_dir = os.environ.get("VJEPA_CHECKPOINT_DIR", "./checkpoints")
+    if normalized_model in checkpoint_files:
+        checkpoint_path = os.path.join(checkpoint_dir, checkpoint_files[normalized_model])
+        if os.path.exists(checkpoint_path):
+            print(f"Loading V-JEPA checkpoint from local path: {checkpoint_path}")
+            return load_vjepa_model_source(normalized_model)
+
+    hub_dir = torch.hub.get_dir()
+    for root, _, files in os.walk(hub_dir):
+        if os.path.basename(root) == "hub" and "backbones.py" in files:
+            continue
+        if root.endswith(os.path.join("src", "hub")) and "backbones.py" in files:
+            backbones_py = os.path.join(root, "backbones.py")
+            with open(backbones_py, "r") as f:
+                text = f.read()
+            patched = text.replace("http://localhost:8300", "https://dl.fbaipublicfiles.com/vjepa2")
+            if patched != text:
+                with open(backbones_py, "w") as f:
+                    f.write(patched)
+                print(f"Patched V-JEPA torch.hub checkpoint URL in {backbones_py}")
+
     img_size = 384 if "384" in model else 256
     if model == 'vith' or model == 'vit_huge':
         encoder, predictor = torch.hub.load('facebookresearch/vjepa2', 'vjepa2_vit_huge')

@@ -44,8 +44,8 @@ SEED_LIST=(42)
 
 GUIDANCE_STEP_PATTERN="0x5,1x45"
 GUIDANCE_LR_PATTERNS=("0.001x50")
-GUIDANCE_SCALE=0.001
-GUIDANCE_FREQUENCY=1
+GUIDANCE_SCALE="${GUIDANCE_SCALE:-0.001}"
+GUIDANCE_FREQUENCY="${GUIDANCE_FREQUENCY:-1}"
 
 # CFG scale values for classifier-free guidance ablation
 CFG_SCALES=("6.0")
@@ -82,14 +82,22 @@ if [[ -n "${SAMPLE_METHODS_OVERRIDE:-}" ]]; then
 else
     SAMPLE_METHODS=("vanilla")
 fi
-NUM_SAMPLING_STEPS="50"
-NUM_FRAMES="49"
+NUM_SAMPLING_STEPS="${NUM_SAMPLING_STEPS:-50}"
+NUM_FRAMES="${NUM_FRAMES:-49}"
+VIDEO_HEIGHT="${VIDEO_HEIGHT:-480}"
+VIDEO_WIDTH="${VIDEO_WIDTH:-720}"
+BATCH_START_IDX="${BATCH_START_IDX:-0}"
+BATCH_MAX_ENTRIES="${BATCH_MAX_ENTRIES:-0}"
 REJECTION_SAMPLES="${REJECTION_SAMPLES:-10}"  # Number of candidates to generate for rejection sampling
 
 # I2V conditioning comes from JSON (input_video or image); no static INIT_IMAGE here
 
 # V-JEPA slice-pred fixed settings
-VJEPA_VARIANTS=("vit_giant")
+if [[ -n "${VJEPA_VARIANT_OVERRIDE:-}" ]]; then
+    read -r -a VJEPA_VARIANTS <<< "$VJEPA_VARIANT_OVERRIDE"
+else
+    VJEPA_VARIANTS=("vit_giant")
+fi
 VJEPA_IMG_SIZE=256
 VJEPA_MASKING_MODE="causal"
 # Loss aggregation modes to iterate over
@@ -153,6 +161,8 @@ for SAMPLE_METHOD in "${SAMPLE_METHODS[@]}"; do
                                 --output_folder "$RUN_OUTPUT_FOLDER" \
                                 --batch_json "$BATCH_JSON" \
                                 --base_dir "$BASEDIR" \
+                                --start_idx "$BATCH_START_IDX" \
+                                --max_entries "$BATCH_MAX_ENTRIES" \
                                 --num_gpus $TOTAL_GPUS \
                                 --gpu_idx $GLOBAL_GPU_IDX \
                                 --num_nodes $NUM_NODES \
@@ -160,9 +170,9 @@ for SAMPLE_METHOD in "${SAMPLE_METHODS[@]}"; do
                                 --gpus_per_node $NUM_GPUS_PER_NODE \
                                 --sampling_method "$SAMPLE_METHOD" \
                                 --num_inference_steps $NUM_SAMPLING_STEPS \
-                                --num_frames 49 \
-                                --height 480 \
-                                --width 720 \
+                                --num_frames $NUM_FRAMES \
+                                --height $VIDEO_HEIGHT \
+                                --width $VIDEO_WIDTH \
                                 --cfg_scale $CFG_SCALE \
                                 --guidance_scale $GUIDANCE_SCALE \
                                 --vjepa_variant $VJEPA_VARIANT \
