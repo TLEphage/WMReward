@@ -238,6 +238,53 @@ ln -sf /root/physics-consistency-eval/WMReward/checkpoints/vitg.pt \
 ls -lh checkpoints/vitg.pt
 ```
 
+### 3.4 准备 PhysicsIQ switch-frames
+
+如果可以使用 `gcloud`，下载命令：
+
+```bash
+cd /root/physics-consistency-eval/WMReward
+
+mkdir -p PhysicsIQ/code/physics-IQ-benchmark
+
+gcloud storage rsync --recursive \
+  gs://physics-iq-benchmark/switch-frames \
+  PhysicsIQ/code/physics-IQ-benchmark/switch-frames
+```
+
+如果无法连接 `packages.cloud.google.com` 或无法安装 `gcloud`，使用仓库脚本直接从公开 HTTPS 地址下载 `prompts/physics_iq.json` 中引用的首帧图像：
+
+```bash
+cd /root/physics-consistency-eval/WMReward
+conda activate wmreward1
+
+python -u downloader/download_physicsiq_switch_frames.py \
+  --start_idx 0 \
+  --max_entries 8
+```
+
+该脚本默认输出到：
+
+```text
+PhysicsIQ/code/physics-IQ-benchmark/switch-frames/
+```
+
+检查命令：
+
+```bash
+ls -lh PhysicsIQ/code/physics-IQ-benchmark/switch-frames/0001_switch-frames_anyFPS_perspective-left_trimmed-ball-and-block-fall.jpg
+find PhysicsIQ/code/physics-IQ-benchmark/switch-frames -name "*.jpg" | wc -l
+```
+
+记录：
+
+| 指标 | 数值 |
+| --- | --- |
+| switch-frames 下载命令 | `[待填：gcloud rsync 或 downloader/download_physicsiq_switch_frames.py]` |
+| 下载图片数 | `[待填]` |
+| 下载总耗时 | `[待填]` |
+| switch-frames 目录大小 | `[待填]` |
+
 ## 4. 单样本 MAGI-1 4.5B I2V 生成
 
 ### 4.1 运行命令
