@@ -1,0 +1,20 @@
+{
+  "experiment_name": "vanilla_cp2baseline_f49_s64_cfg6.0_seed42",
+  "timestamp": "2026-07-08T09:52:24.803336",
+  "config_version": "cp2baseline",
+  "parameters": {
+    "sampling_method": "vanilla",
+    "num_frames": 49,
+    "num_inference_steps": 64,
+    "cfg_scale": 6.0,
+    "config_file": "/root/autodl-tmp/4.5B_base_config_cp2.json",
+    "magi_model_variant": "4.5B_base",
+    "enable_prompt_expansion": false,
+    "prompt_expansion_mode": "coect",
+    "prompt_expansion_max_events": 4,
+    "prompt_file": null,
+    "batch_json": "prompts/physics_iq.json",
+    "height": 480,
+    "width": 720
+  }
+}

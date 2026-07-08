@@ -1,0 +1,20 @@
+{
+  "experiment_name": "vanilla_v2_f49_s40_cfg6.0_seed42_promptx_softstage",
+  "timestamp": "2026-07-08T03:36:48.056561",
+  "config_version": "v2",
+  "parameters": {
+    "sampling_method": "vanilla",
+    "num_frames": 49,
+    "num_inference_steps": 40,
+    "cfg_scale": 6.0,
+    "config_file": "./MAGI-1/example/4.5B/4.5B_base_config.json",
+    "magi_model_variant": "4.5B_base",
+    "enable_prompt_expansion": true,
+    "prompt_expansion_mode": "soft_stage",
+    "prompt_expansion_max_events": 4,
+    "prompt_file": null,
+    "batch_json": "./prompts/physics_iq.json",
+    "height": 480,
+    "width": 720
+  }
+}

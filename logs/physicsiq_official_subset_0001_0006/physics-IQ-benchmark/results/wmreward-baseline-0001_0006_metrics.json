@@ -1,0 +1,19 @@
+{
+    "score_spatiotemporal": 0.10161594302689306,
+    "score_spatial": 0.5186350390263191,
+    "score_weighted_spatial": 0.3567668595246385,
+    "score_mse": 0.020812499999999998,
+    "final_score_raw": 0.3048601138592835,
+    "final_score_stable": 0.3048601138592835,
+    "final_score_orig": 0.3048601138592835,
+    "variance_mse": 0.0009870833333333335,
+    "variance_spatiotemporal_iou": 0.5294895833333333,
+    "variance_spatial": 0.6178183643824078,
+    "variance_weighted_spatial": 0.6019173513649102,
+    "final_score_view": 0.31557037258650217,
+    "score_spatiotemporal_view": 0.35836780807948565,
+    "score_spatial_view": 0.5337047794314121,
+    "score_weighted_spatial_view": 0.3088272851213056,
+    "score_mse_view": 0.0613816177138051,
+    "final_score_origround": 30.49
+}

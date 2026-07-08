@@ -1,0 +1,13 @@
+method,video,videophy_sa,videophy_pc,videophy_avg,sa_binary_0p5,pc_binary_0p5,both_binary_0p5,videopath
+baseline_gf5,0001_trimmed-ball-and-block-fall.mp4,0.62109375,0.06005859375,0.340576171875,1,0,0,/root/autodl-tmp/physics-consistency-eval/WMReward/generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_v2cp2gf5base3_f49_s40_gs0.001_gf5_cfg6.0_seed42_tfps4_ctx1/0001_trimmed-ball-and-block-fall.mp4
+baseline_gf5,0005_trimmed-ball-behind-rotating-paper.mp4,0.22265625,0.22265625,0.22265625,0,0,0,/root/autodl-tmp/physics-consistency-eval/WMReward/generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_v2cp2gf5base3_f49_s40_gs0.001_gf5_cfg6.0_seed42_tfps4_ctx1/0005_trimmed-ball-behind-rotating-paper.mp4
+baseline_gf5,0008_trimmed-ball-hits-duck.mp4,0.006683349609375,0.2021484375,0.1044158935546875,0,0,0,/root/autodl-tmp/physics-consistency-eval/WMReward/generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_v2cp2gf5base3_f49_s40_gs0.001_gf5_cfg6.0_seed42_tfps4_ctx1/0008_trimmed-ball-hits-duck.mp4
+promptx_gf5,0001_trimmed-ball-and-block-fall.mp4,0.5625,0.0260009765625,0.29425048828125,1,0,0,/root/autodl-tmp/physics-consistency-eval/WMReward/generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_v2cp2gf5promptx3_f49_s40_gs0.001_gf5_cfg6.0_seed42_promptx_tfps4_ctx1/0001_trimmed-ball-and-block-fall.mp4
+promptx_gf5,0005_trimmed-ball-behind-rotating-paper.mp4,0.1484375,0.2451171875,0.19677734375,0,0,0,/root/autodl-tmp/physics-consistency-eval/WMReward/generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_v2cp2gf5promptx3_f49_s40_gs0.001_gf5_cfg6.0_seed42_promptx_tfps4_ctx1/0005_trimmed-ball-behind-rotating-paper.mp4
+promptx_gf5,0008_trimmed-ball-hits-duck.mp4,0.002471923828125,0.037353515625,0.0199127197265625,0,0,0,/root/autodl-tmp/physics-consistency-eval/WMReward/generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_v2cp2gf5promptx3_f49_s40_gs0.001_gf5_cfg6.0_seed42_promptx_tfps4_ctx1/0008_trimmed-ball-hits-duck.mp4
+delta_promptx_minus_baseline,0001_trimmed-ball-and-block-fall.mp4,-0.05859375,-0.0340576171875,-0.04632568359375,0,0,0,
+delta_promptx_minus_baseline,0005_trimmed-ball-behind-rotating-paper.mp4,-0.07421875,0.0224609375,-0.02587890625,0,0,0,
+delta_promptx_minus_baseline,0008_trimmed-ball-hits-duck.mp4,-0.00421142578125,-0.164794921875,-0.084503173828125,0,0,0,
+baseline_gf5,MEAN_3VIDEOS,0.283477783203125,0.16162109375,0.2225494384765625,0.3333333333333333,0.0,0.0,
+promptx_gf5,MEAN_3VIDEOS,0.23780314127604166,0.10282389322916667,0.17031351725260416,0.3333333333333333,0.0,0.0,
+delta_promptx_minus_baseline,MEAN_3VIDEOS,-0.045674641927083336,-0.058797200520833336,-0.052235921223958336,0.0,0.0,0.0,

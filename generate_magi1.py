@@ -17,6 +17,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from prompt_expansion import PromptExpansionConfig, expand_prompt
+
 # Add MAGI-1 submodule to path
 MAGI1_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "MAGI-1")
 MAGI1_MODEL_VARIANTS = ("4.5B_base", "4.5B_distill", "4.5B_distill_quant", "24B_base")
@@ -94,6 +96,22 @@ if MAGI1_PATH not in sys.path:
     sys.path.insert(0, MAGI1_PATH)
 
 
+def maybe_expand_prompt(prompt: str, args) -> str:
+    if not getattr(args, "enable_prompt_expansion", False):
+        return prompt
+    expanded = expand_prompt(
+        prompt,
+        PromptExpansionConfig(
+            mode=getattr(args, "prompt_expansion_mode", "coect"),
+            max_events=getattr(args, "prompt_expansion_max_events", 4),
+        ),
+    )
+    if expanded != prompt:
+        print(f"Original prompt: {prompt}")
+        print(f"Expanded prompt: {expanded}")
+    return expanded
+
+
 def main():
     parser = argparse.ArgumentParser(description="MAGI-1 I2V generation with VJEPA guidance")
     parser.add_argument("--prompt", type=str, required=True, help="Text prompt describing the video")
@@ -111,8 +129,17 @@ def main():
         help="Path to MAGI-1 configuration JSON file. Defaults to MAGI-1 4.5B base.",
     )
     parser.add_argument("--output_path", type=str, required=True, help="Path to save the output video")
+    parser.add_argument("--enable_prompt_expansion", action="store_true", help="Enable deterministic event-centric prompt expansion before generation.")
+    parser.add_argument("--prompt_expansion_mode", type=str, default="coect", help="Prompt expansion template mode: coect, soft_stage, or action_focus. All modes are deterministic/template-based.")
+    parser.add_argument("--prompt_expansion_max_events", type=int, default=4, help="Maximum number of event clauses added by prompt expansion.")
     parser.add_argument("--guidance_scale", type=float, default=0.001, help="VJEPA guidance scale.")
     parser.add_argument("--guidance_frequency", type=int, default=5, help="VJEPA guidance frequency.")
+    parser.add_argument("--vjepa_guidance_max_calls", type=int, default=int(os.environ.get("VJEPA_GUIDANCE_MAX_CALLS", "0")), help="Maximum number of V-JEPA guidance applications per generated video. 0 means unlimited.")
+    parser.add_argument("--enable_adaptive_guidance", action="store_true", help="Apply the capped V-JEPA guidance call in a middle denoising window instead of the first eligible step.")
+    parser.add_argument("--adaptive_guidance_t_min", type=float, default=float(os.environ.get("VJEPA_ADAPTIVE_T_MIN", "0.25")), help="Lower t bound for adaptive one-shot guidance.")
+    parser.add_argument("--adaptive_guidance_t_max", type=float, default=float(os.environ.get("VJEPA_ADAPTIVE_T_MAX", "0.75")), help="Upper t bound for adaptive one-shot guidance.")
+    parser.add_argument("--adaptive_guidance_target_t", type=float, default=float(os.environ.get("VJEPA_ADAPTIVE_TARGET_T", "0.50")), help="Preferred t value for adaptive one-shot guidance.")
+    parser.add_argument("--vjepa_guidance_target_fps", type=int, default=int(os.environ.get("VJEPA_GUIDANCE_TARGET_FPS", "16")), help="Temporal FPS used inside V-JEPA guidance. Lower values reduce guidance memory.")
     parser.add_argument("--vjepa_type", type=str, default="vitg", help="VJEPA model variant.")
     parser.add_argument(
         "--mode",
@@ -125,6 +152,7 @@ def main():
     parser.add_argument("--init_video", type=str, default=None, help="Path to prefix video for V2V mode")
     args = parser.parse_args()
     args.config_file = args.config_file or default_magi1_config(args.magi_model_variant)
+    args.prompt = maybe_expand_prompt(args.prompt, args)
     ensure_magi1_submodule()
     ensure_video_output_path(args.output_path)
 
@@ -138,6 +166,12 @@ def main():
     # Initialize MAGI-1 pipeline
     pipeline = MagiPipeline(args.config_file)
     if args.guidance_scale > 0:
+        os.environ["VJEPA_GUIDANCE_MAX_CALLS"] = str(int(args.vjepa_guidance_max_calls or 0))
+        os.environ["VJEPA_GUIDANCE_ADAPTIVE"] = "1" if args.enable_adaptive_guidance else "0"
+        os.environ["VJEPA_ADAPTIVE_T_MIN"] = str(args.adaptive_guidance_t_min)
+        os.environ["VJEPA_ADAPTIVE_T_MAX"] = str(args.adaptive_guidance_t_max)
+        os.environ["VJEPA_ADAPTIVE_TARGET_T"] = str(args.adaptive_guidance_target_t)
+        os.environ["VJEPA_GUIDANCE_TARGET_FPS"] = str(int(args.vjepa_guidance_target_fps or 16))
         pipeline.guidance_scale = args.guidance_scale
         pipeline.guidance_frequency = args.guidance_frequency
         pipeline.vjepa_type = args.vjepa_type

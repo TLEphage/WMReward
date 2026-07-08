@@ -762,3 +762,326 @@ MAGI-1/example/4.5B/4.5B_base_config.json
 2. 当前单样本命令只生成 `1` 个候选视频；只有 `REJECTION_SAMPLES=16` 时才会为每条样本生成 16 个候选视频。
 3. 单卡 A100 40G 更适合先跑 vanilla 和小 N rejection；`N=16` 的单样本耗时约为 10 小时量级。
 4. `--guidance_scale 0` 表示关闭 gradient guidance，生成阶段不会使用 VJEPA；VJEPA 只在后续 WMReward 打分或 rejection 选择候选时使用。
+
+
+---
+
+## 2026-07-07 单卡 A100 guidance 最小闭环复现实验
+
+### 目标
+
+在仅一张 A100 40GB、实验时间有限的条件下，用部分 PhysicsIQ 数据完成 MAGI-1-4.5B 的 baseline vanilla 与 WMReward/V-JEPA guidance 对照，重点验证 guidance 路径确实参与生成，并观察 WMReward 指标方向。
+
+### 关键工程修复
+
+- 修复 V-JEPA `vitg.pt` 加载路径：优先使用仓库本地 checkpoint loader，避免 torch hub 下载/缓存问题。
+- V-JEPA target encoder 与 encoder 共享冻结权重，减少显存。
+- V-JEPA 默认驻留 CPU，仅在 guidance loss/grad 窗口搬到 GPU。
+- guidance VAE decode 前后 offload V-JEPA，并在 guidance 返回前 detach/清理临时张量。
+- 新增 `VJEPA_GUIDANCE_TARGET_FPS` 与 `VJEPA_GUIDANCE_MAX_CALLS` 环境变量。本次用 `MAX_CALLS=1` 保留一次真实 guidance，避免第二次 differentiable VAE decode 在 40GB 显存上 OOM。
+
+### 显存试错结论
+
+- `f49/s40/480x720` 与 `f25/s32/320x480` 在单卡 A100 40GB 上不可行。
+- `f25/s32/256x384` 可以完成第一次 guidance loss/grad，但最后 DiT forward 仍差约 28MB OOM。
+- 最终可稳定闭环配置为：`NUM_FRAMES=25`, `NUM_SAMPLING_STEPS=32`, `VIDEO_HEIGHT=192`, `VIDEO_WIDTH=320`, `CFG=6.0`, `seed=42`, `VJEPA=vitg`, `VJEPA_GUIDANCE_TARGET_FPS=4`, `VJEPA_GUIDANCE_MAX_CALLS=1`。
+
+### 生成结果
+
+PhysicsIQ 条目：`0001_trimmed-ball-and-block-fall.mp4`
+
+| 方法 | Guidance scale | 输出视频 | 生成日志 | 备注 |
+|---|---:|---|---|---|
+| vanilla | - | `generated_videos/physics_iq/MAGI-1-4.5B_base/vanilla_v2_f25_s32_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4` | `logs/vanilla_f25_s32_h192w320_1sample.log` | max memory allocated 10.74GB |
+| guidance | 0.001 | `generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_v2_f25_s32_gs0.001_gf5_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4` | `logs/guidance_cleanup_tfps4_max1_gs0.001_gf5_f25_s32_h192w320_1sample.log` | loss 0.712718, grad norm 1.223113, max memory allocated 28.27GB |
+| guidance | 0.005 | `generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_v2_f25_s32_gs0.005_gf5_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4` | `logs/guidance_cleanup_tfps4_max1_gs0.005_gf5_f25_s32_h192w320_1sample.log` | loss 0.712718, grad norm 1.223076, max memory allocated 28.27GB |
+
+### WMReward / V-JEPA Surprise Score
+
+打分命令均使用 `python compute_wmreward.py --video_path <mp4> --model vitg`。
+
+| 方法 | Guidance scale | Surprise score ↓ | Similarity ↑ | score log |
+|---|---:|---:|---:|---|
+| vanilla | - | 0.416858 | 0.583142 | `logs/score_vanilla_f25_s32_h192w320_0001.log` |
+| guidance | 0.001 | 0.416821 | 0.583179 | `logs/score_guidance_f25_s32_h192w320_gs0.001_gf5_max1_0001.log` |
+| guidance | 0.005 | 0.416785 | 0.583215 | `logs/score_guidance_f25_s32_h192w320_gs0.005_gf5_max1_0001.log` |
+
+结论：在相同 PhysicsIQ 条目、帧数、steps、分辨率和 seed 下，guidance 版本的 VJEPA Surprise 低于 vanilla，且 `0.005` 比 `0.001` 改善更明显。单样本差异很小，但方向与 guidance 优化目标一致，同时日志中有明确 `loss / rho / scaling / grad norm`，可以证明 guidance 实际注入了 velocity 更新。
+
+### 后续建议
+
+- 若还有时间，优先沿用 `192x320/f25/s32/gs0.005/max_calls=1` 扩展到 PhysicsIQ 前 3-5 条，汇总均值，而不是回到 `256x384` 硬顶显存。
+- 如果必须提高分辨率，可尝试 `224x352`，仍保留 `MAX_CALLS=1`；`256x384` 已证明非常接近 40GB 上限，不建议批量跑。
+- 正式报告中应说明本复现是 A100 40GB 受限版本：模型换为 MAGI-1-4.5B，分辨率降为 192x320，guidance 每视频只调用一次。
+
+## 10. 新服务器双卡 CP2 guidance 复现记录（2026-07-08）
+
+### 机器与环境
+
+- 新服务器：`connect.westd.seetacloud.com:23899`。
+- 实际 GPU：2 x NVIDIA RTX PRO 6000 Blackwell Server Edition，约 `97.9GB/卡`，不是 H800。
+- 仓库路径：`/root/physics-consistency-eval/WMReward`，实际位于数据盘 `/root/autodl-tmp/physics-consistency-eval/WMReward`。
+- conda 环境：`/root/miniconda3/envs/wmreward1`。
+- `torch 2.4.0+cu124` 不支持 Blackwell `sm_120`，已升级到 `torch 2.11.0+cu128`、`torchvision 0.26.0+cu128`、`triton 3.6.0`。
+- 原 `flash_attn 2.6.3` ABI 不兼容，当前使用 `MAGI-1/inference/model/flash_attn_fallback.py` 的 PyTorch SDPA fallback。fallback 已补充 GQA/MQA head repeat，可支持 MAGI 的 `q_heads=24, kv_heads=8`。
+
+### 正常分辨率试错结论
+
+- guidance 的 step 数需要满足 `num_steps % len(noise2clean_kvrange) == 0`。当前 `noise2clean_kvrange=[5,4,3,2]`，因此 `50 steps` 会触发断言，正式运行改为 `64 steps`。
+- 单卡独立样本方式运行 `f96 / 720x720 / 64 steps` 会 OOM，SDPA fallback 下单卡约 `95GB` 仍不够。
+- 单卡独立样本方式运行 `f49 / 480x720 / 64 steps` 也会在第二个推理段 OOM。因此双卡不能只做样本并行，必须让单样本拆到两张卡。
+- `BATCH_START_IDX=0` 的 `0001_trimmed-ball-and-block-fall.mp4` 在高分辨率输入预处理时 ffmpeg 报 `png inflate returned error -3`，本轮正式 guidance 从 `0002` 开始。
+
+### 可行配置
+
+创建临时配置 `/root/autodl-tmp/4.5B_base_config_cp2.json`，仅将 `engine_config.cp_size` 从 `1` 改为 `2`，并使用 `torchrun --nproc_per_node=2` 运行单样本 context parallel。
+
+```bash
+VJEPA_GUIDANCE_TARGET_FPS=4 \
+VJEPA_GUIDANCE_MAX_CALLS=1 \
+torchrun --nproc_per_node=2 --master_port=<port> generator_i2v_multinode.py \
+  --config_file /root/autodl-tmp/4.5B_base_config_cp2.json \
+  --magi_model_variant 4.5B_base \
+  --sampling_method guidance \
+  --num_inference_steps 64 \
+  --num_frames 49 \
+  --height 480 \
+  --width 720 \
+  --guidance_scale 0.001 \
+  --guidance_frequency 5 \
+  --vjepa_variant vit_giant \
+  --config_version cp2max1
+```
+
+### 生成产物
+
+输出目录：
+
+```text
+generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_cp2max1_f49_s64_gs0.001_gf5_cfg6.0_seed42/
+```
+
+已生成 `0002` 到 `0008` 共 7 条 guidance 视频。每条日志均包含真实 guidance 调用，例如 `apply guidance 0` 以及对应 `loss`。CP2 峰值显存约 `43.8GB/卡`。
+
+关键日志：
+
+- `logs/newserver_cp2_guidance_cp2max1_f49_s64_h480w720_idx1_1_gs0.001_gf5.log`
+- `logs/newserver_cp2_guidance_cp2max1_f49_s64_h480w720_idx1_7_gs0.001_gf5.log`
+- `logs/newserver_cp2_guidance_cp2max1_f49_s64_h480w720_idx5_3_gs0.001_gf5.log`
+
+### WMReward / V-JEPA Surprise Score
+
+汇总文件：
+
+```text
+logs/newserver_cp2_guidance_cp2max1_f49_s64_h480w720_scores.tsv
+```
+
+| video | surprise | similarity |
+|---|---:|---:|
+| 0002_trimmed-ball-and-block-fall.mp4 | 0.432365 | 0.567635 |
+| 0003_trimmed-ball-and-block-fall.mp4 | 0.447834 | 0.552166 |
+| 0004_trimmed-ball-behind-rotating-paper.mp4 | 0.435288 | 0.564712 |
+| 0005_trimmed-ball-behind-rotating-paper.mp4 | 0.457647 | 0.542353 |
+| 0006_trimmed-ball-behind-rotating-paper.mp4 | 0.440295 | 0.559705 |
+| 0007_trimmed-ball-hits-duck.mp4 | 0.439664 | 0.560336 |
+| 0008_trimmed-ball-hits-duck.mp4 | 0.394655 | 0.605345 |
+
+### 当前结论
+
+- 新服务器可以支持 MAGI-1-4.5B 的正常分辨率 guidance 复现，但需要 `cp_size=2` 把单样本拆到双卡。
+- 在当前 SDPA fallback 下，MAGI 原始 `96 frames / 720x720 / 64 steps` 仍不能以单卡样本并行方式完成；`49 frames / 480x720 / 64 steps` 配合 CP2 已验证可行。
+- 本轮按最新要求未继续运行 vanilla。后续若需要 baseline，可直接复用同一个 `cp_size=2` 配置，把 `--sampling_method guidance` 改为 `vanilla`，并保持 `f49 / 480x720 / 64 steps`。
+- 远程断开时建议用 `setsid -f ... < /dev/null > log 2>&1` 启动，避免 SSH 断开导致 `torchrun` 收到 SIGHUP。
+
+## 2026-07-08 CP2 `0001` 一次 guidance / 基线对比
+
+### 实验目的
+
+在前一批 CP2 正常分辨率 guidance 结果中，`0001_trimmed-ball-and-block-fall.mp4` 尚未纳入同配置对比。本节补齐 `0001` 的 once guidance 结果，并检查是否已有可比 baseline。检查后确认没有完全匹配 `f49 / 480x720 / 64 steps / cfg6.0 / seed42 / cp_size=2` 的 baseline，因此额外生成了一条 vanilla baseline。
+
+### 代码修正
+
+`generator_i2v_multinode.py` 原先会把所有 init frame 写到固定路径 `/tmp/magi1_init_frame.png`。多 rank 或多进程并发读写时，该临时 PNG 可能被覆盖或读到半写入内容。已改为在 `/tmp/wmreward_magi1_init/` 下写入进程唯一的临时 PNG。
+
+对于 CP2 vanilla/guidance，MAGI 已经会把最终 mp4 写入 `video_path`。后续又移除了冗余的 `load_video(video_path)` 和二次导出步骤，避免 rank1 在写入后立即读取导致竞争。下面的 `0001` guidance 视频生成早于第二处清理，所以日志里出现了 rank1 post-read traceback；该异常发生在 mp4 已经写完之后，视频本身通过了 `ffprobe` 和完整 `ffmpeg` 解码检查。
+
+### 输出文件
+
+| 方法 | 输出视频 | 生成日志 |
+| --- | --- | --- |
+| once guidance | `generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_cp2max1_f49_s64_gs0.001_gf5_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4` | `logs/newserver_cp2_guidance_cp2max1_f49_s64_h480w720_idx0_1_gs0.001_gf5.log` |
+| vanilla baseline | `generated_videos/physics_iq/MAGI-1-4.5B_base/vanilla_cp2_f49_s64_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4` | `logs/newserver_cp2_vanilla_f49_s64_h480w720_idx0_1.log` |
+
+`0001` 的 guidance 日志包含真实 guidance 调用：
+
+```text
+apply guidance 0, guidance_frequency 5, guidance scale 0.001
+loss: 0.7149926424026489, rho: 0.001, scaling: 234.3042755126953, velocity norm: 1437.658447265625, grad norm: 3.8281757831573486
+```
+
+两条视频均可正常解码，规格为 `720x480`、`8 fps`、`72` 帧。
+
+### WMReward 对比
+
+汇总文件：
+
+```text
+logs/newserver_cp2_0001_guidance_vs_vanilla_scores.tsv
+```
+
+| 方法 | surprise | similarity |
+| --- | ---: | ---: |
+| vanilla 基线 | 0.457875 | 0.542125 |
+| 一次 guidance | 0.458469 | 0.541531 |
+| guidance - 基线 | +0.000594 | -0.000594 |
+
+结论：对 `0001` 这一条样本，guidance 确实参与了 denoising，但 WMReward 指标没有改善。该样本应作为“不改善样例”记录，不能单独作为 guidance 有指标收益的证据。主 CP2 guidance 分数文件已经补入 `0001`：
+
+```text
+logs/newserver_cp2_guidance_cp2max1_f49_s64_h480w720_scores.tsv
+```
+
+## 2026-07-08 CP2 基线 / 一次 guidance / 每 5 步 guidance 对比（`0001-0008`）
+
+### 实验目的
+
+按照当前复现实验目标，清理 `generated_videos` 中不含视频文件的空结果目录；复用已有 once guidance 结果，不重新生成；用相同无关变量重新跑 baseline；再使用双卡尝试“每 5 次 denoising 做一次 guidance”的多次 guidance 设置，覆盖 PhysicsIQ 条目 `0001-0008`。
+
+### 硬件记录
+
+新服务器实际报告的 GPU 为 2 张 `NVIDIA RTX PRO 6000 Blackwell Server Edition`，每张约 `96GB` 显存。该信息以服务器 `nvidia-smi` 为准，和租赁描述中的 H800 80GB 不一致。
+
+### 清理记录
+
+删除了 `generated_videos` 下 16 个递归不含视频文件的结果目录。判定的视频后缀包括 `.mp4/.avi/.mov/.webm/.mkv`。
+
+### 生成设置
+
+三组实验的公共设置如下：
+
+```text
+模型：MAGI-1-4.5B_base
+并行：cp_size=2
+视频：49 frames, 480x720
+采样：64 denoising steps, cfg_scale=6.0, seed=42
+数据：batch_json=prompts/physics_iq.json, base_dir=PhysicsIQ/code
+范围：0001-0008
+```
+
+baseline 重新生成：
+
+```text
+generated_videos/physics_iq/MAGI-1-4.5B_base/vanilla_cp2baseline_f49_s64_cfg6.0_seed42
+logs/newserver_cp2_baseline_rerun_f49_s64_h480w720_idx0_8.log
+```
+
+once guidance 复用已有结果，不重新生成：
+
+```text
+generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_cp2max1_f49_s64_gs0.001_gf5_cfg6.0_seed42
+logs/newserver_cp2_guidance_cp2max1_f49_s64_h480w720_scores.tsv
+```
+
+every-5 guidance 新生成：
+
+```text
+generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_cp2truegf5_f49_s64_gs0.001_gf5_cfg6.0_seed42_tfps4
+logs/newserver_cp2_guidance_truegf5_f49_s64_h480w720_idx0_8.log
+```
+
+every-5 guidance 共完成 `8/8` 条视频，日志返回 `EXIT_CODE:0`。日志中有 72 行 `loss:`，即每条视频 9 次 guidance 调用。峰值显存约为 `45.32GB allocated / 45.45GB reserved`，未发生 OOM。
+
+### WMReward 指标结果
+
+相关文件：
+
+```text
+logs/newserver_cp2_baseline_f49_s64_h480w720_scores.tsv
+logs/newserver_cp2_guidance_cp2max1_f49_s64_h480w720_scores.tsv
+logs/newserver_cp2_guidance_truegf5_f49_s64_h480w720_scores.tsv
+logs/newserver_cp2_baseline_vs_guidance_compare_0001_0008.tsv
+logs/newserver_cp2_baseline_vs_guidance_compare_0001_0008_summary.md
+```
+
+WMReward 中 `surprise` 越低越好，`similarity` 越高越好。
+
+| 方法 | 平均 surprise | 平均 similarity | 相对 baseline 的 surprise 变化 | 优于 baseline 的样本数 |
+| --- | ---: | ---: | ---: | ---: |
+| 基线（baseline） | 0.430063 | 0.569936 | 0.000000 | - |
+| 一次 guidance | 0.438277 | 0.561723 | +0.008214 | 2/8 |
+| 每 5 步 guidance | 0.429572 | 0.570428 | -0.000491 | 5/8 |
+
+WMReward 结论：once guidance 在这 8 条样本上的平均 surprise 反而高于 baseline，不体现收益；every-5 guidance 的平均 surprise 比 baseline 低 `0.000491`，有 `5/8` 条优于 baseline。与 once guidance 相比，every-5 guidance 的平均 surprise 低 `0.008705`，有 `6/8` 条优于 once guidance。因此，在 WMReward 代理指标上，多次 guidance 比一次 guidance 更稳定，也更能体现 guidance 的作用。
+
+## 2026-07-08 外部评测指标汇总（Physics-IQ 与 VideoPhy）
+
+### 评测指标说明
+
+本次记录中使用了三类指标，含义和可比性不同：
+
+| 指标 | 评测对象 | 数值方向 | 本次用途 | 注意事项 |
+| --- | --- | --- | --- | --- |
+| WMReward / V-JEPA surprise | 生成视频在 V-JEPA 表征空间中的 surprise | `surprise` 越低越好，`similarity` 越高越好 | 项目内部代理指标，用于检查 guidance 是否降低 V-JEPA surprise | 不是 Physics-IQ 官方分数；更适合作为 guidance 是否生效的内部证据 |
+| Physics-IQ 官方指标 | 多视角物理一致性评测 | `final_score_origround` 越高越好；`final_score_orig/stable/view` 越高越好 | 对齐 Physics-IQ 官方 evaluator 的结果 | 官方 aggregate 需要完整 3-view scenario；当前 `0007-0008` 缺少 `0009/right view`，不能并入官方总分 |
+| VideoPhy / VideoCon-Physics | 文本-视频语义一致性与物理一致性 entailment | SA、PC 分数越高越好 | 用外部 VLM evaluator 检查生成视频是否更符合描述和物理约束 | 官方推理输出是连续概率；本记录中的 `>=0.5` 通过率仅作二值化参考 |
+
+### Physics-IQ 官方子集结果（`0001-0006`）
+
+执行记录：
+
+```text
+评测代码：/root/autodl-tmp/eval_repos/physics-IQ-benchmark-main
+结果目录：logs/physicsiq_official_subset_0001_0006
+汇总文件：logs/videophy_eval_0001_0008/physicsiq_official_subset_0001_0006_summary.tsv
+```
+
+只报告 `0001-0006`，因为这 6 条正好组成两个完整的 3-view scenario。当前 `0007-0008` 是下一个 scenario 的两个视角，缺少 `0009/right view`，不能纳入官方 Physics-IQ aggregate。为满足官方 evaluator 的输入要求，本次用于 Physics-IQ 的生成视频从 `3s/24 frames` padding 到 `5s/40 frames`。
+
+| 方法 | final_score_origround / 100 | final_score_orig | final_score_stable | final_score_view |
+| --- | ---: | ---: | ---: | ---: |
+| 基线（baseline） | 30.49 | 0.304860 | 0.304860 | 0.315570 |
+| 一次 guidance | 25.70 | 0.256943 | 0.256943 | 0.304078 |
+| 每 5 步 guidance | 30.45 | 0.304524 | 0.304524 | 0.315237 |
+
+Physics-IQ 结论：在 `0001-0006` 这个很小的官方可计算子集上，baseline 与 every-5 guidance 基本持平，once guidance 明显更低。因此，当前 Physics-IQ 官方分数不能证明 guidance 优于 baseline，只能说明 every-5 guidance 没有像 once guidance 一样造成明显退化。该结论受样本数、缺失 `0009` 以及 padding 处理影响。
+
+### VideoPhy / VideoCon-Physics 结果（`0001-0008`）
+
+执行记录：
+
+```text
+评测代码：/root/autodl-tmp/eval_repos/videophy-main
+评测权重：/root/autodl-tmp/eval_repos/videocon_physics
+专用环境：/root/autodl-tmp/eval_repos/videophy_eval_venv
+SA 日志：logs/videophy_eval_0001_0008/run_sa.log
+PC 日志：logs/videophy_eval_0001_0008/run_pc.log
+逐视频分数：logs/videophy_eval_0001_0008/videophy_scores_0001_0008.tsv
+方法均值：logs/videophy_eval_0001_0008/videophy_method_summary_0001_0008.tsv
+汇总报告：logs/videophy_eval_0001_0008/combined_eval_summary_0001_0008.md
+```
+
+VideoPhy 的两个子指标为：
+
+- SA：semantic alignment，文本描述与视频内容是否匹配。
+- PC：physics consistency，视频是否符合物理一致性判断。
+
+| 方法 | 视频数 | SA mean | PC mean | 平均分 `(SA+PC)/2` | SA >= 0.5 | PC >= 0.5 | 两者均 >= 0.5 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 基线（baseline） | 8 | 0.202377 | 0.064667 | 0.133522 | 0.000 | 0.000 | 0.000 |
+| 一次 guidance | 8 | 0.243481 | 0.099640 | 0.171560 | 0.125 | 0.000 | 0.000 |
+| 每 5 步 guidance | 8 | 0.240143 | 0.071350 | 0.155746 | 0.000 | 0.000 | 0.000 |
+
+VideoPhy 结论：在 `0001-0008` 全部当前视频上，两种 guidance 的平均 VideoPhy 分数均高于 baseline；once guidance 的 SA、PC 和平均分最高，every-5 guidance 也高于 baseline。该指标支持“guidance 对生成结果有正向作用”的结论，但 PC 绝对值整体偏低，`PC >= 0.5` 的样本数为 0，说明视频物理一致性仍然较弱。
+
+### 综合结论
+
+当前最稳妥的表述是：
+
+- guidance 路径已经通过日志中的 `apply guidance`、`loss`、`grad norm` 等信息确认真实参与 denoising。
+- WMReward 代理指标显示 every-5 guidance 比 once guidance 更稳定，且相对同配置 baseline 有轻微平均收益。
+- VideoPhy / VideoCon-Physics 显示 once guidance 和 every-5 guidance 的外部 VLM 评测均值都高于 baseline，能体现 guidance 的正向作用。
+- Physics-IQ 官方子集上，every-5 guidance 与 baseline 基本持平，once guidance 更差；因此不能声称 Physics-IQ 官方分数已经复现出明显提升。
+- 由于当前只覆盖 8 条生成视频，且 Physics-IQ 官方分数只能合法计算 `0001-0006`，本实验应描述为“部分 PhysicsIQ 数据上的轻量复现与趋势验证”，而不是完整复现原论文/原项目结果。
+
+后续若要让 Physics-IQ 官方指标更有说服力，应至少继续生成 `0009` 补齐第三个 scenario，最好按完整 3-view scenario 成组扩展样本数量，并保持 baseline、once guidance、every-5 guidance 的生成配置完全一致。

@@ -47,6 +47,7 @@ import math
 import numpy as np
 from PIL import Image
 from utils import compute_vjepa_loss_sliding_window, load_vjepa_models_torchhub
+from prompt_expansion import PromptExpansionConfig, expand_prompt
 
 # Add MAGI-1 submodule to path
 MAGI1_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "MAGI-1")
@@ -135,6 +136,9 @@ def save_experiment_metadata(args, experiment_name, experiment_folder):
             "cfg_scale": args.cfg_scale,
             "config_file": args.config_file,
             "magi_model_variant": getattr(args, "magi_model_variant", None),
+            "enable_prompt_expansion": getattr(args, "enable_prompt_expansion", False),
+            "prompt_expansion_mode": getattr(args, "prompt_expansion_mode", None),
+            "prompt_expansion_max_events": getattr(args, "prompt_expansion_max_events", None),
             "prompt_file": getattr(args, 'prompt_file', None),
             "batch_json": getattr(args, 'batch_json', None),
             "height": getattr(args, 'height', 480),
@@ -147,6 +151,13 @@ def save_experiment_metadata(args, experiment_name, experiment_folder):
         metadata["parameters"].update({
             "guidance_scale": getattr(args, 'guidance_scale', None),
             "guidance_frequency": getattr(args, 'guidance_frequency', None),
+            "vjepa_guidance_max_calls": getattr(args, 'vjepa_guidance_max_calls', None),
+            "enable_adaptive_guidance": getattr(args, 'enable_adaptive_guidance', False),
+            "adaptive_guidance_t_min": getattr(args, 'adaptive_guidance_t_min', None),
+            "adaptive_guidance_t_max": getattr(args, 'adaptive_guidance_t_max', None),
+            "adaptive_guidance_target_t": getattr(args, 'adaptive_guidance_target_t', None),
+            "vjepa_guidance_target_fps": getattr(args, 'vjepa_guidance_target_fps', None),
+            "vjepa_guidance_n_context": getattr(args, 'vjepa_guidance_n_context', None),
             "vjepa_type": getattr(args, 'vjepa_type', None),
             "vjepa_variant": getattr(args, 'vjepa_variant', None),
             "legacy_metadata_only_args": guidance_metadata_only_args(args),
@@ -188,11 +199,33 @@ def get_simple_experiment_name(args):
         # Add vjepa variant if not default
         if vjepa_short:
             name += f"_{vjepa_short}"
+        vjepa_guidance_max_calls = int(getattr(args, 'vjepa_guidance_max_calls', 0) or 0)
+        if vjepa_guidance_max_calls > 0:
+            name += f"_gmax{vjepa_guidance_max_calls}"
     elif args.sampling_method == 'rejection':
         name = f"{args.sampling_method}_{version}_f{args.num_frames}_s{args.num_inference_steps}_cfg{args.cfg_scale}"
     # Add rejection samples suffix if using rejection sampling
     if args.sampling_method == 'rejection':
         name += f"_reject{getattr(args, 'rejection_samples', 3)}_{getattr(args, 'loss_mode', 'mean')}"
+
+    if getattr(args, "enable_prompt_expansion", False):
+        name += "_promptx"
+        prompt_mode = str(getattr(args, "prompt_expansion_mode", "coect") or "coect")
+        prompt_mode_key = prompt_mode.lower().replace("-", "_")
+        if prompt_mode_key in {"soft_stage", "softstage", "stage_soft"}:
+            name += "_softstage"
+        elif prompt_mode_key != "coect":
+            name += "_" + "".join(ch if ch.isalnum() else "_" for ch in prompt_mode_key).strip("_")
+
+    if getattr(args, "enable_adaptive_guidance", False):
+        name += "_adapt"
+
+    vjepa_guidance_target_fps = int(getattr(args, "vjepa_guidance_target_fps", 16) or 16)
+    if args.sampling_method == "guidance" and vjepa_guidance_target_fps != 16:
+        name += f"_tfps{vjepa_guidance_target_fps}"
+    vjepa_guidance_n_context = int(getattr(args, "vjepa_guidance_n_context", 3) or 3)
+    if args.sampling_method == "guidance" and vjepa_guidance_n_context != 3:
+        name += f"_ctx{vjepa_guidance_n_context}"
 
     if "5frame" in args.batch_json:
         name += "_5frame"
@@ -273,12 +306,41 @@ def load_first_frame(image_path: str | None, video_path: str | None) -> Image.Im
     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     return Image.fromarray(frame_rgb)
 
+
+def save_init_frame_temp(init_frame, video_path: str, suffix: str = "") -> str:
+    """Save an init frame to a process-unique PNG path for MAGI I2V."""
+    tmp_dir = "/tmp/wmreward_magi1_init"
+    os.makedirs(tmp_dir, exist_ok=True)
+    base = os.path.splitext(os.path.basename(video_path))[0]
+    rank = os.environ.get("RANK", "0")
+    local_rank = os.environ.get("LOCAL_RANK", "0")
+    temp_image_path = os.path.join(
+        tmp_dir,
+        f"{base}_rank{rank}_local{local_rank}_pid{os.getpid()}{suffix}.png",
+    )
+    if isinstance(init_frame, Image.Image):
+        init_frame.save(temp_image_path, format="PNG")
+    else:
+        Image.fromarray(init_frame).save(temp_image_path, format="PNG")
+    return temp_image_path
+
 def init_pipeline(args):
     """Initialize the MAGI-1 pipeline."""
     if args.sampling_method == "guidance":
         from inference.pipeline.pipeline_w_guidance import MagiPipeline
     else:
         from inference.pipeline.pipeline import MagiPipeline
+
+    if args.sampling_method == "guidance":
+        os.environ["VJEPA_GUIDANCE_MAX_CALLS"] = str(
+            int(getattr(args, "vjepa_guidance_max_calls", 0) or 0)
+        )
+        os.environ["VJEPA_GUIDANCE_ADAPTIVE"] = "1" if getattr(args, "enable_adaptive_guidance", False) else "0"
+        os.environ["VJEPA_ADAPTIVE_T_MIN"] = str(getattr(args, "adaptive_guidance_t_min", 0.25))
+        os.environ["VJEPA_ADAPTIVE_T_MAX"] = str(getattr(args, "adaptive_guidance_t_max", 0.75))
+        os.environ["VJEPA_ADAPTIVE_TARGET_T"] = str(getattr(args, "adaptive_guidance_target_t", 0.50))
+        os.environ["VJEPA_GUIDANCE_TARGET_FPS"] = str(int(getattr(args, "vjepa_guidance_target_fps", 16) or 16))
+        os.environ["VJEPA_GUIDANCE_N_CONTEXT"] = str(int(getattr(args, "vjepa_guidance_n_context", 3) or 3))
 
     pipeline = MagiPipeline(args.config_file)
     runtime_config = getattr(pipeline.config, "runtime_config", None)
@@ -471,11 +533,7 @@ def generate_videos(pipe, args, init_frame, prompts, negative_prompt, experiment
     # Generate frames
         if args.sampling_method == 'vanilla':
             # Save init_frame temporarily for MAGI-1
-            temp_image_path = "/tmp/magi1_init_frame.png"
-            if isinstance(init_frame, Image.Image):
-                init_frame.save(temp_image_path)
-            else:
-                Image.fromarray(init_frame).save(temp_image_path)
+            temp_image_path = save_init_frame_temp(init_frame, video_path)
 
             # Use MAGI-1's I2V
             pipe.run_image_to_video(
@@ -484,15 +542,11 @@ def generate_videos(pipe, args, init_frame, prompts, negative_prompt, experiment
                 output_path=video_path
             )
 
-            # Read the generated video frames back for export
-            frames = load_video(video_path)
+            # MAGI already writes vanilla output to video_path.
+            frames = None
         elif args.sampling_method == 'guidance':
             # Save init_frame temporarily for MAGI-1
-            temp_image_path = "/tmp/magi1_init_frame.png"
-            if isinstance(init_frame, Image.Image):
-                init_frame.save(temp_image_path)
-            else:
-                Image.fromarray(init_frame).save(temp_image_path)
+            temp_image_path = save_init_frame_temp(init_frame, video_path)
 
             # Use MAGI-1's I2V with built-in guidance
             pipe.run_image_to_video(
@@ -501,8 +555,8 @@ def generate_videos(pipe, args, init_frame, prompts, negative_prompt, experiment
                 output_path=video_path
             )
 
-            # Read the generated video frames back
-            frames = load_video(video_path)
+            # MAGI already writes guidance output to video_path.
+            frames = None
 
 
         elif args.sampling_method == 'rejection':
@@ -516,11 +570,9 @@ def generate_videos(pipe, args, init_frame, prompts, negative_prompt, experiment
                 print(f"    Generating candidate {sample_idx + 1}/{args.rejection_samples}...")
 
                 # Save init_frame temporarily for MAGI-1
-                temp_image_path = f"/tmp/magi1_init_frame_{sample_idx}.png"
-                if isinstance(init_frame, Image.Image):
-                    init_frame.save(temp_image_path)
-                else:
-                    Image.fromarray(init_frame).save(temp_image_path)
+                temp_image_path = save_init_frame_temp(
+                    init_frame, video_path, suffix=f"_candidate_{sample_idx}"
+                )
 
                 # Temporary output path for this candidate
                 candidate_video_path = video_path.replace('.mp4', f'_candidate_{sample_idx}.mp4')
@@ -588,8 +640,9 @@ def generate_videos(pipe, args, init_frame, prompts, negative_prompt, experiment
             best_loss = candidate_losses[best_idx]
             print(f"    Selected candidate {best_idx + 1} with lowest V-JEPA loss: {best_loss:.6f}")
 
-        # Export to video
-        export_to_video(frames, video_path, fps=fps)
+        # Rejection sampling selects frames in memory; vanilla/guidance already save via MAGI.
+        if frames is not None:
+            export_to_video(frames, video_path, fps=fps)
         if args.sampling_method == 'rejection':
             print(f"[{experiment_name}] Generated: {video_path} (selected from {args.rejection_samples} candidates)")
         else:
@@ -634,6 +687,22 @@ def resolve_paths(input_video, input_image, output_video, base_dir):
     input_video_abs = _resolve_existing_input_path(input_video, base_dir)
     input_image_abs = _resolve_existing_input_path(input_image, base_dir)
     return input_video_abs, input_image_abs, output_video
+
+
+def maybe_expand_prompt(prompt: str, args) -> str:
+    if not getattr(args, "enable_prompt_expansion", False):
+        return prompt
+    expanded = expand_prompt(
+        prompt,
+        PromptExpansionConfig(
+            mode=getattr(args, "prompt_expansion_mode", "coect"),
+            max_events=getattr(args, "prompt_expansion_max_events", 4),
+        ),
+    )
+    if expanded != prompt:
+        print(f"Original prompt: {prompt}")
+        print(f"Expanded prompt: {expanded}")
+    return expanded
 
 def chunk_prompts(prompts, num_chunks, chunk_idx):
     """Divide the prompts into chunks and return the chunk corresponding to the given index."""
@@ -686,6 +755,9 @@ def main():
     parser.add_argument('--height', type=int, default=480, help='Height of the generated videos.')
     parser.add_argument('--width', type=int, default=720, help='Width of the generated videos.')
     parser.add_argument('--cfg_scale', type=float, default=6.0, help='Classifier-free guidance scale.')
+    parser.add_argument('--enable_prompt_expansion', action='store_true', help='Enable deterministic event-centric prompt expansion before generation.')
+    parser.add_argument('--prompt_expansion_mode', type=str, default='coect', help='Prompt expansion template mode: coect, soft_stage, or action_focus. All modes are deterministic/template-based.')
+    parser.add_argument('--prompt_expansion_max_events', type=int, default=4, help='Maximum number of event clauses added by prompt expansion.')
 
     # Guidance sampling parameters
     parser.add_argument('--guidance_scale', type=float, default=0.001, help='VJEPA guidance scale.')
@@ -693,6 +765,13 @@ def main():
     parser.add_argument('--guidance_end', type=int, default=1001, help='Legacy option kept for compatibility; not consumed by the current MAGI guidance path.')
     parser.add_argument('--guidance_rho_scale', type=float, default=6.0, help='Legacy option kept for compatibility; not consumed by the current MAGI guidance path.')
     parser.add_argument('--guidance_frequency', type=int, default=5, help='Frequency of guidance updates.')
+    parser.add_argument('--vjepa_guidance_max_calls', type=int, default=int(os.environ.get('VJEPA_GUIDANCE_MAX_CALLS', '0')), help='Maximum number of V-JEPA guidance applications per generated video. 0 means unlimited.')
+    parser.add_argument('--enable_adaptive_guidance', action='store_true', help='Apply the capped V-JEPA guidance call in a middle denoising window instead of the first eligible step.')
+    parser.add_argument('--adaptive_guidance_t_min', type=float, default=float(os.environ.get('VJEPA_ADAPTIVE_T_MIN', '0.25')), help='Lower t bound for adaptive one-shot guidance.')
+    parser.add_argument('--adaptive_guidance_t_max', type=float, default=float(os.environ.get('VJEPA_ADAPTIVE_T_MAX', '0.75')), help='Upper t bound for adaptive one-shot guidance.')
+    parser.add_argument('--adaptive_guidance_target_t', type=float, default=float(os.environ.get('VJEPA_ADAPTIVE_TARGET_T', '0.50')), help='Preferred t value for adaptive one-shot guidance.')
+    parser.add_argument('--vjepa_guidance_target_fps', type=int, default=int(os.environ.get('VJEPA_GUIDANCE_TARGET_FPS', '16')), help='Temporal FPS used inside V-JEPA guidance. Lower values reduce guidance memory.')
+    parser.add_argument('--vjepa_guidance_n_context', type=int, default=int(os.environ.get('VJEPA_GUIDANCE_N_CONTEXT', '3')), help='Number of previous clean chunks used as V-JEPA guidance context. Lower values reduce guidance memory.')
     parser.add_argument('--travel_time', type=str, default='3,12', help='Legacy option kept for compatibility; not consumed by the current MAGI guidance path.')
 
     # VJEPA guidance parameters
@@ -735,6 +814,10 @@ def main():
     print(f"Frames per video: {args.num_frames}")
     print(f"CFG scale: {args.cfg_scale}")
     print(f"Resolution: {args.height}x{args.width}")
+    print(f"Prompt expansion: {args.enable_prompt_expansion}")
+    if args.enable_prompt_expansion:
+        print(f"  - Mode: {args.prompt_expansion_mode}")
+        print(f"  - Max events: {args.prompt_expansion_max_events}")
 
     print(f"Running in batch_json mode. Multi-node setup:")
     print(f"  - Node {args.node_id + 1}/{args.num_nodes}")
@@ -745,6 +828,12 @@ def main():
         print(f"Guidance parameters:")
         print(f"  - Scale: {args.guidance_scale}")
         print(f"  - Frequency: {args.guidance_frequency}")
+        print(f"  - Max V-JEPA guidance calls per video: {args.vjepa_guidance_max_calls or 'unlimited'}")
+        print(f"  - Adaptive guidance: {args.enable_adaptive_guidance}")
+        if args.enable_adaptive_guidance:
+            print(f"    t window: [{args.adaptive_guidance_t_min}, {args.adaptive_guidance_t_max}], target={args.adaptive_guidance_target_t}")
+        print(f"  - V-JEPA guidance target FPS: {args.vjepa_guidance_target_fps}")
+        print(f"  - V-JEPA guidance context chunks: {args.vjepa_guidance_n_context}")
         print(f"  - V-JEPA backbone: {normalize_vjepa_variant(args.vjepa_type or args.vjepa_variant)}")
         print("  - Note: legacy guidance tuning flags are metadata-only today and are not consumed by the current MAGI guidance path.")
 
@@ -798,7 +887,8 @@ def main():
             init_frame = load_video(input_video_abs)
 
         # Prepare prompts list and negative prompt
-        per_item_prompts = [prompt]
+        expanded_prompt = maybe_expand_prompt(prompt, args)
+        per_item_prompts = [expanded_prompt]
 
 
         # Save under the configured output folder and experiment name.

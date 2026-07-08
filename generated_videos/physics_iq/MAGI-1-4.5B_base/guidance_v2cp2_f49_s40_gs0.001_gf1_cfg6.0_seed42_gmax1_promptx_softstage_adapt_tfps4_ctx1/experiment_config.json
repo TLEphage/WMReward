@@ -1,0 +1,43 @@
+{
+  "experiment_name": "guidance_v2cp2_f49_s40_gs0.001_gf1_cfg6.0_seed42_gmax1_promptx_softstage_adapt_tfps4_ctx1",
+  "timestamp": "2026-07-08T11:22:22.530186",
+  "config_version": "v2cp2",
+  "parameters": {
+    "sampling_method": "guidance",
+    "num_frames": 49,
+    "num_inference_steps": 40,
+    "cfg_scale": 6.0,
+    "config_file": "/root/autodl-tmp/4.5B_base_config_cp2.json",
+    "magi_model_variant": "4.5B_base",
+    "enable_prompt_expansion": true,
+    "prompt_expansion_mode": "soft_stage",
+    "prompt_expansion_max_events": 4,
+    "prompt_file": null,
+    "batch_json": "./prompts/physics_iq.json",
+    "height": 480,
+    "width": 720,
+    "guidance_scale": 0.001,
+    "guidance_frequency": 1,
+    "vjepa_guidance_max_calls": 1,
+    "enable_adaptive_guidance": true,
+    "adaptive_guidance_t_min": 0.45,
+    "adaptive_guidance_t_max": 0.65,
+    "adaptive_guidance_target_t": 0.5,
+    "vjepa_guidance_target_fps": 4,
+    "vjepa_guidance_n_context": 1,
+    "vjepa_type": null,
+    "vjepa_variant": "vit_giant",
+    "legacy_metadata_only_args": {
+      "guidance_start": 0,
+      "guidance_end": 1001,
+      "guidance_rho_scale": 6.0,
+      "travel_time": "3,12",
+      "guidance_step_pattern": "0x5,1x45",
+      "guidance_lr_pattern": "0.001x50",
+      "vjepa_context_frames": 8,
+      "slice_stride": 8,
+      "slice_window_size": 16,
+      "loss_mode": "mean"
+    }
+  }
+}

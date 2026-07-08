@@ -46,6 +46,22 @@ GUIDANCE_STEP_PATTERN="0x5,1x45"
 GUIDANCE_LR_PATTERNS=("0.001x50")
 GUIDANCE_SCALE="${GUIDANCE_SCALE:-0.001}"
 GUIDANCE_FREQUENCY="${GUIDANCE_FREQUENCY:-1}"
+VJEPA_GUIDANCE_MAX_CALLS="${VJEPA_GUIDANCE_MAX_CALLS:-1}"
+ENABLE_ADAPTIVE_GUIDANCE="${ENABLE_ADAPTIVE_GUIDANCE:-0}"
+ADAPTIVE_GUIDANCE_T_MIN="${ADAPTIVE_GUIDANCE_T_MIN:-0.25}"
+ADAPTIVE_GUIDANCE_T_MAX="${ADAPTIVE_GUIDANCE_T_MAX:-0.75}"
+ADAPTIVE_GUIDANCE_TARGET_T="${ADAPTIVE_GUIDANCE_TARGET_T:-0.50}"
+VJEPA_GUIDANCE_TARGET_FPS="${VJEPA_GUIDANCE_TARGET_FPS:-16}"
+MASTER_PORT_BASE="${MASTER_PORT_BASE:-6009}"
+ADAPTIVE_GUIDANCE_ARGS=()
+if [[ "$ENABLE_ADAPTIVE_GUIDANCE" == "1" || "$ENABLE_ADAPTIVE_GUIDANCE" == "true" ]]; then
+    ADAPTIVE_GUIDANCE_ARGS=(
+        --enable_adaptive_guidance
+        --adaptive_guidance_t_min "$ADAPTIVE_GUIDANCE_T_MIN"
+        --adaptive_guidance_t_max "$ADAPTIVE_GUIDANCE_T_MAX"
+        --adaptive_guidance_target_t "$ADAPTIVE_GUIDANCE_TARGET_T"
+    )
+fi
 
 # CFG scale values for classifier-free guidance ablation
 CFG_SCALES=("6.0")
@@ -89,6 +105,17 @@ VIDEO_WIDTH="${VIDEO_WIDTH:-720}"
 BATCH_START_IDX="${BATCH_START_IDX:-0}"
 BATCH_MAX_ENTRIES="${BATCH_MAX_ENTRIES:-0}"
 REJECTION_SAMPLES="${REJECTION_SAMPLES:-10}"  # Number of candidates to generate for rejection sampling
+ENABLE_PROMPT_EXPANSION="${ENABLE_PROMPT_EXPANSION:-0}"
+PROMPT_EXPANSION_MODE="${PROMPT_EXPANSION_MODE:-coect}"
+PROMPT_EXPANSION_MAX_EVENTS="${PROMPT_EXPANSION_MAX_EVENTS:-4}"
+PROMPT_EXPANSION_ARGS=()
+if [[ "$ENABLE_PROMPT_EXPANSION" == "1" || "$ENABLE_PROMPT_EXPANSION" == "true" ]]; then
+    PROMPT_EXPANSION_ARGS=(
+        --enable_prompt_expansion
+        --prompt_expansion_mode "$PROMPT_EXPANSION_MODE"
+        --prompt_expansion_max_events "$PROMPT_EXPANSION_MAX_EVENTS"
+    )
+fi
 
 # I2V conditioning comes from JSON (input_video or image); no static INIT_IMAGE here
 
@@ -131,7 +158,7 @@ for SAMPLE_METHOD in "${SAMPLE_METHODS[@]}"; do
                 for CFG_SCALE in "${CFG_SCALES[@]}"; do
                     for LOSS_MODE in "${ACTIVE_LOSS_MODES[@]}"; do
                     for VJEPA_VARIANT in "${VJEPA_VARIANTS[@]}"; do
-                    echo "Config: Method=$SAMPLE_METHOD, GuidanceScale=$GUIDANCE_SCALE, GuidanceFreq=$GUIDANCE_FREQUENCY, CFG=$CFG_SCALE, VJEPA=$VJEPA_VARIANT"
+                    echo "Config: Method=$SAMPLE_METHOD, GuidanceScale=$GUIDANCE_SCALE, GuidanceFreq=$GUIDANCE_FREQUENCY, VJEPA_MAX_CALLS=$VJEPA_GUIDANCE_MAX_CALLS, Adaptive=$ENABLE_ADAPTIVE_GUIDANCE, CFG=$CFG_SCALE, VJEPA=$VJEPA_VARIANT"
 
                     # Match structure: <OUTPUT_FOLDER>/<group>/<experiment>/<name>.mp4
                     if [[ "$(basename "$BATCH_JSON")" == "physics_iq.json" ]]; then
@@ -154,8 +181,9 @@ for SAMPLE_METHOD in "${SAMPLE_METHODS[@]}"; do
                         for ((g=0; g<NUM_GPUS_PER_NODE; g++)); do
                             # Calculate global GPU index across all nodes
                             GLOBAL_GPU_IDX=$((NODE_ID * NUM_GPUS_PER_NODE + g))
-                            echo "  -> Launching worker on Node $NODE_ID, Local GPU $g (Global GPU $GLOBAL_GPU_IDX) with LR pattern $GUIDANCE_LR_PATTERN"
-                            CUDA_VISIBLE_DEVICES=$g python generator_i2v_multinode.py \
+                            WORKER_MASTER_PORT=$((MASTER_PORT_BASE + GLOBAL_GPU_IDX))
+                            echo "  -> Launching worker on Node $NODE_ID, Local GPU $g (Global GPU $GLOBAL_GPU_IDX, MASTER_PORT=$WORKER_MASTER_PORT) with LR pattern $GUIDANCE_LR_PATTERN"
+                            CUDA_VISIBLE_DEVICES=$g MASTER_ADDR=localhost MASTER_PORT=$WORKER_MASTER_PORT GPUS_PER_NODE=1 NNODES=1 WORLD_SIZE=1 RANK=0 LOCAL_RANK=0 python generator_i2v_multinode.py \
                                 --config_file "$MAGI1_CONFIG_FILE" \
                                 --magi_model_variant "$MAGI1_MODEL_VARIANT" \
                                 --output_folder "$RUN_OUTPUT_FOLDER" \
@@ -174,6 +202,7 @@ for SAMPLE_METHOD in "${SAMPLE_METHODS[@]}"; do
                                 --height $VIDEO_HEIGHT \
                                 --width $VIDEO_WIDTH \
                                 --cfg_scale $CFG_SCALE \
+                                "${PROMPT_EXPANSION_ARGS[@]}" \
                                 --guidance_scale $GUIDANCE_SCALE \
                                 --vjepa_variant $VJEPA_VARIANT \
                                 --vjepa_img_size $VJEPA_IMG_SIZE \
@@ -184,6 +213,9 @@ for SAMPLE_METHOD in "${SAMPLE_METHODS[@]}"; do
                                 --guidance_step_pattern "$GUIDANCE_STEP_PATTERN" \
                                 --guidance_lr_pattern "$GUIDANCE_LR_PATTERN" \
                                 --guidance_frequency $GUIDANCE_FREQUENCY \
+                                --vjepa_guidance_max_calls $VJEPA_GUIDANCE_MAX_CALLS \
+                                --vjepa_guidance_target_fps $VJEPA_GUIDANCE_TARGET_FPS \
+                                "${ADAPTIVE_GUIDANCE_ARGS[@]}" \
                                 --loss_mode "$LOSS_MODE" \
                                 --rejection_samples $REJECTION_SAMPLES \
                                 --config_version "v2" \

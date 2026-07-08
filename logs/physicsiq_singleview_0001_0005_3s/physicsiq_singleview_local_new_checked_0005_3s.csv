@@ -1,0 +1,2 @@
+method,task_id,scenario,view,frames,real_take1_md5,real_take2_md5,spatiotemporal_iou_mean,spatial_iou_mean,weighted_spatial_iou_mean,mse_mean,real_take_variance_mse_mean,real_take_variance_spatiotemporal_iou_mean
+local_new_checked,0005,trimmed-ball-behind-rotating-paper.mp4,perspective-center,72,ec83ab3a7b222803c5a1b6b03379fa9d,ec83ab3a7b222803c5a1b6b03379fa9d,0.023478367019444193,0.3930783982749021,0.20157033782284728,0.010143115326880232,0.0,1.0

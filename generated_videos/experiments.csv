@@ -1,0 +1,8 @@
+name,method,frames,steps,context_frames,slice_stride,g_step_pattern,g_lr_pattern,g_frequency,travel_time,cfg_scale,timestamp,status
+guidance_singletruegf5smoke_f49_s64_gs0.001_gf5_cfg6.0_seed42,guidance,49,64,8,4,0x3,3x12,2x12,1x23,3.0x15,2.0x15,1.0x20,5,3,12,6.0,2026-07-08 02:36:21,started
+guidance_cp2truegf5smoke_f49_s64_gs0.001_gf5_cfg6.0_seed42,guidance,49,64,8,4,0x3,3x12,2x12,1x23,3.0x15,2.0x15,1.0x20,5,3,12,6.0,2026-07-08 02:48:26,started
+guidance_cp2truegf5smoke_f49_s64_gs0.001_gf5_cfg6.0_seed42,guidance,49,64,8,4,0x3,3x12,2x12,1x23,3.0x15,2.0x15,1.0x20,5,3,12,6.0,2026-07-08 02:48:26,started
+guidance_cp2truegf5smoke2_f49_s64_gs0.001_gf5_cfg6.0_seed42_tfps4,guidance,49,64,8,4,0x3,3x12,2x12,1x23,3.0x15,2.0x15,1.0x20,5,3,12,6.0,2026-07-08 09:14:04,started
+guidance_cp2truegf5smoke2_f49_s64_gs0.001_gf5_cfg6.0_seed42_tfps4,guidance,49,64,8,4,0x3,3x12,2x12,1x23,3.0x15,2.0x15,1.0x20,5,3,12,6.0,2026-07-08 09:14:04,started
+guidance_cp2truegf5smoke2_f49_s64_gs0.001_gf5_cfg6.0_seed42_tfps4,guidance,49,64,8,4,0x3,3x12,2x12,1x23,3.0x15,2.0x15,1.0x20,5,3,12,6.0,2026-07-08 09:19:50,completed
+guidance_cp2truegf5smoke2_f49_s64_gs0.001_gf5_cfg6.0_seed42_tfps4,guidance,49,64,8,4,0x3,3x12,2x12,1x23,3.0x15,2.0x15,1.0x20,5,3,12,6.0,2026-07-08 09:19:50,completed

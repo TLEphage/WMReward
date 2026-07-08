@@ -1,0 +1,33 @@
+{
+  "experiment_name": "guidance_v2_f25_s32_gs0.001_gf5_cfg6.0_seed42",
+  "timestamp": "2026-07-07T23:53:24.729559",
+  "config_version": "v2",
+  "parameters": {
+    "sampling_method": "guidance",
+    "num_frames": 25,
+    "num_inference_steps": 32,
+    "cfg_scale": 6.0,
+    "config_file": "./MAGI-1/example/4.5B/4.5B_base_config.json",
+    "magi_model_variant": "4.5B_base",
+    "prompt_file": null,
+    "batch_json": "./prompts/physics_iq.json",
+    "height": 192,
+    "width": 320,
+    "guidance_scale": 0.001,
+    "guidance_frequency": 5,
+    "vjepa_type": null,
+    "vjepa_variant": "vit_giant",
+    "legacy_metadata_only_args": {
+      "guidance_start": 0,
+      "guidance_end": 1001,
+      "guidance_rho_scale": 6.0,
+      "travel_time": "3,12",
+      "guidance_step_pattern": "0x5,1x45",
+      "guidance_lr_pattern": "0.001x50",
+      "vjepa_context_frames": 8,
+      "slice_stride": 8,
+      "slice_window_size": 16,
+      "loss_mode": "mean"
+    }
+  }
+}

@@ -1,0 +1,4 @@
+method	video	surprise	similarity	log	output
+vanilla	0001_trimmed-ball-and-block-fall.mp4	0.457875	0.542125	logs/score_cp2_vanilla_f49_s64_h480w720_0001.log	generated_videos/physics_iq/MAGI-1-4.5B_base/vanilla_cp2_f49_s64_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4
+guidance	0001_trimmed-ball-and-block-fall.mp4	0.458469	0.541531	logs/score_cp2_guidance_f49_s64_h480w720_gs0.001_gf5_0001.log	generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_cp2max1_f49_s64_gs0.001_gf5_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4
+delta_guidance_minus_vanilla	0001_trimmed-ball-and-block-fall.mp4	+0.000594	-0.000594		

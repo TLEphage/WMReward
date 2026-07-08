@@ -1,0 +1,1006 @@
+# WMReward MAGI-1 4.5B 轻量复现实验记录
+
+## 1. 实验设置
+
+| 项目 | 内容 |
+| --- | --- |
+| 实验目标 | 使用 MAGI-1 4.5B 替代原项目 MAGI-1 24B，完成单卡轻量 I2V 生成，并用 VJEPA-2 计算 WMReward |
+| 实验日期 | 2026-07-07 |
+| 代码目录 | `/root/physics-consistency-eval/WMReward` |
+| Conda 环境 | `wmreward1` |
+| GPU | A100 40G |
+| 生成模型 | MAGI-1 `4.5B_base` |
+| 生成模式 | I2V |
+| Guidance | 关闭，`--guidance_scale 0` |
+| WMReward 模型 | VJEPA-2 `vitg` |
+
+本实验采用 MAGI-1 4.5B vanilla pipeline 生成视频，不在 denoising 过程中接入 WMReward guidance。视频生成完成后，再单独使用 `compute_wmreward.py` 对输出视频计算 VJEPA surprise score。
+
+当前 MAGI-1 4.5B 默认生成配置：
+
+```text
+video_size_h = 720
+video_size_w = 720
+num_frames = 96
+num_steps = 64
+fps = 24
+```
+
+## 2. 环境配置
+
+### 2.1 创建 Python 环境
+
+运行命令：
+
+```bash
+cd /root/physics-consistency-eval/WMReward
+
+conda env create -f environment.yml
+conda activate wmreward
+```
+
+若已创建实验环境：
+
+```bash
+conda activate wmreward1
+```
+
+记录：
+
+| 指标 | 数值 |
+| --- | --- |
+| Python 版本 | `3.10` |
+| Conda 环境名 | `wmreward1` |
+
+### 2.2 安装推理依赖
+
+运行命令：
+
+```bash
+pip install torch==2.4.0 torchvision==0.19.0 \
+  --index-url https://download.pytorch.org/whl/cu124
+
+pip install flash-attn==2.4.2 --no-build-isolation
+
+pip install flashinfer-python==0.2.0.post2 \
+  --extra-index-url https://flashinfer.ai/whl/cu124/torch2.4/
+```
+
+记录：
+
+| 指标 | 数值 |
+| --- | --- |
+| PyTorch 版本 | `2.4.0+cu124` |
+| PyTorch CUDA 版本 | `12.4` |
+| NVIDIA Driver | `[待填]` |
+| `nvidia-smi` CUDA Version | `12.8` |
+
+检查命令：
+
+```bash
+python - <<'PY'
+import torch
+print("torch:", torch.__version__)
+print("torch cuda:", torch.version.cuda)
+print("cuda available:", torch.cuda.is_available())
+if torch.cuda.is_available():
+    print("gpu:", torch.cuda.get_device_name(0))
+PY
+
+nvidia-smi
+```
+
+### 2.3 安装系统视频工具
+
+运行命令：
+
+```bash
+apt-get update
+apt-get install -y ffmpeg
+```
+
+或：
+
+```bash
+conda install -c conda-forge ffmpeg -y
+```
+
+检查命令：
+
+```bash
+which ffmpeg
+ffmpeg -version | head -n 1
+```
+
+记录：
+
+| 指标 | 数值 |
+| --- | --- |
+| ffmpeg 路径 | `[待填]` |
+| ffmpeg 版本 | `[待填]` |
+
+## 3. 代码和模型准备
+
+### 3.1 初始化子模块
+
+运行命令：
+
+```bash
+cd /root/physics-consistency-eval/WMReward
+git submodule update --init --recursive
+git submodule sync --recursive
+```
+
+记录：
+
+| 指标 | 数值 |
+| --- | --- |
+| 代码 commit | `[待填：git rev-parse HEAD]` |
+| MAGI-1 子模块 commit | `[待填]` |
+| vjepa2 子模块 commit | `[待填]` |
+
+查看命令：
+
+```bash
+git rev-parse HEAD
+git submodule status
+```
+
+### 3.2 下载 MAGI-1 4.5B 权重
+
+运行命令：
+
+```bash
+cd /root/physics-consistency-eval/WMReward
+conda activate wmreward1
+
+pip install "huggingface_hub[cli]"
+python -u downloader/download_magi1_4_5b.py
+```
+
+该命令下载并整理以下目录：
+
+```text
+downloads/
+├── 4.5B_base/
+├── vae/
+└── t5_pretrained/
+```
+
+记录：
+
+| 指标 | 数值 |
+| --- | --- |
+| 下载总耗时 | `2 小时左右` |
+| `downloads/4.5B_base` 大小 | `[待填]` |
+| `downloads/vae` 大小 | `[待填]` |
+| `downloads/t5_pretrained` 大小 | `[待填]` |
+
+查看命令：
+
+```bash
+du -sh downloads/4.5B_base downloads/vae downloads/t5_pretrained
+```
+
+### 3.3 下载 VJEPA-2 vitg 权重
+
+推荐使用 `aria2c` 多连接下载：
+
+```bash
+cd /root/physics-consistency-eval/WMReward
+conda activate wmreward1
+
+mkdir -p checkpoints
+
+apt-get update
+apt-get install -y aria2
+
+aria2c \
+  -c \
+  -x 16 \
+  -s 16 \
+  -k 4M \
+  --max-tries=0 \
+  --retry-wait=10 \
+  --timeout=60 \
+  --connect-timeout=30 \
+  -d checkpoints \
+  -o vitg.pt \
+  https://dl.fbaipublicfiles.com/vjepa2/vitg.pt
+```
+
+如果不安装 `aria2c`，也可以使用仓库脚本下载：
+
+```bash
+python -u downloader/download_vjepa2.py --model vitg
+```
+
+如使用旧版 `compute_wmreward.py`，可将下载好的 checkpoint 软链接到 torch hub 缓存目录：
+
+```bash
+mkdir -p /root/.cache/torch/hub/checkpoints
+ln -sf /root/physics-consistency-eval/WMReward/checkpoints/vitg.pt \
+  /root/.cache/torch/hub/checkpoints/vitg.pt
+```
+
+记录：
+
+| 指标 | 数值 |
+| --- | --- |
+| 下载命令 | `aria2c -c -x 16 -s 16 -k 4M ... https://dl.fbaipublicfiles.com/vjepa2/vitg.pt` |
+| VJEPA checkpoint | `checkpoints/vitg.pt` |
+| checkpoint 大小 | `约 15.3 GB` |
+| 下载总耗时 | `20 分钟左右` |
+
+查看命令：
+
+```bash
+ls -lh checkpoints/vitg.pt
+```
+
+### 3.4 准备 PhysicsIQ switch-frames
+
+如果可以使用 `gcloud`，下载命令：
+
+```bash
+cd /root/physics-consistency-eval/WMReward
+
+mkdir -p PhysicsIQ/code/physics-IQ-benchmark
+
+gcloud storage rsync --recursive \
+  gs://physics-iq-benchmark/switch-frames \
+  PhysicsIQ/code/physics-IQ-benchmark/switch-frames
+```
+
+如果无法连接 `packages.cloud.google.com` 或无法安装 `gcloud`，使用仓库脚本直接从公开 HTTPS 地址下载 `prompts/physics_iq.json` 中引用的首帧图像：
+
+```bash
+cd /root/physics-consistency-eval/WMReward
+conda activate wmreward1
+
+python -u downloader/download_physicsiq_switch_frames.py \
+  --start_idx 0 \
+  --max_entries 8
+```
+
+该脚本默认输出到：
+
+```text
+PhysicsIQ/code/physics-IQ-benchmark/switch-frames/
+```
+
+检查命令：
+
+```bash
+ls -lh PhysicsIQ/code/physics-IQ-benchmark/switch-frames/0001_switch-frames_anyFPS_perspective-left_trimmed-ball-and-block-fall.jpg
+find PhysicsIQ/code/physics-IQ-benchmark/switch-frames -name "*.jpg" | wc -l
+```
+
+记录：
+
+| 指标 | 数值 |
+| --- | --- |
+| switch-frames 下载命令 | `[待填：gcloud rsync 或 downloader/download_physicsiq_switch_frames.py]` |
+| 下载图片数 | `[待填]` |
+| 下载总耗时 | `[待填]` |
+| switch-frames 目录大小 | `[待填]` |
+
+## 4. 单样本 MAGI-1 4.5B I2V 生成
+
+### 4.1 运行命令
+
+```bash
+cd /root/physics-consistency-eval/WMReward
+conda activate wmreward1
+
+mkdir -p results logs
+
+export MASTER_ADDR=localhost
+export MASTER_PORT=6009
+export GPUS_PER_NODE=1
+export NNODES=1
+export WORLD_SIZE=1
+export RANK=0
+export LOCAL_RANK=0
+export PAD_HQ=1
+export PAD_DURATION=1
+export OFFLOAD_T5_CACHE=true
+export OFFLOAD_VAE_CACHE=true
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+python generate_magi1.py \
+  --config_file ./MAGI-1/example/4.5B/4.5B_base_config.json \
+  --prompt "A ball falls from the table onto the floor" \
+  --init_image ./example/0001_switch-frames_anyFPS_perspective-left_trimmed-ball-and-block-fall.jpg \
+  --output_path ./results/magi1_output.mp4 \
+  --mode i2v \
+  --guidance_scale 0 \
+  2>&1 | tee logs/generate_magi1_4_5b_i2v.log
+```
+
+该命令执行内容：
+
+1. 加载 MAGI-1 4.5B、T5、VAE。
+2. 读取输入首帧图像和文本 prompt。
+3. 生成 `720x720`、`96` 帧、`24 fps` 视频。
+4. 将结果保存为 `./results/magi1_output.mp4`。
+
+### 4.2 运行记录
+
+| 指标 | 数值 |
+| --- | --- |
+| 输入图像 | `./example/0001_switch-frames_anyFPS_perspective-left_trimmed-ball-and-block-fall.jpg` |
+| Prompt | `A ball falls from the table onto the floor` |
+| 输出视频 | `./results/magi1_output.mp4` |
+| 单命令总运行时间 | `38 分钟左右` |
+| 峰值显存 | `12GB 左右` |
+
+查看输出：
+
+```bash
+ls -lh ./results/magi1_output.mp4
+ffprobe ./results/magi1_output.mp4
+```
+
+监控命令：
+
+```bash
+watch -n 1 nvidia-smi
+tail -f logs/generate_magi1_4_5b_i2v.log
+```
+
+## 5. 单视频 WMReward 计算
+
+### 5.1 检查 VJEPA-2 vitg 权重
+
+运行命令：
+
+```bash
+cd /root/physics-consistency-eval/WMReward
+conda activate wmreward1
+
+ls -lh checkpoints/vitg.pt
+```
+
+VJEPA-2 `vitg` 权重路径：
+
+```text
+checkpoints/vitg.pt
+```
+
+记录：
+
+| 指标 | 数值 |
+| --- | --- |
+| VJEPA checkpoint | `checkpoints/vitg.pt` |
+| checkpoint 大小 | `约 15.3 GB` |
+
+### 5.2 运行命令
+
+```bash
+cd /root/physics-consistency-eval/WMReward
+conda activate wmreward1
+
+python compute_wmreward.py \
+  --video_path ./results/magi1_output.mp4 \
+  --model vitg \
+  --window_size 16 \
+  --context_frames 8 \
+  --stride 8 \
+  2>&1 | tee logs/compute_wmreward_magi1_output_vitg.log
+```
+
+该命令执行内容：
+
+1. 读取 `./results/magi1_output.mp4`。
+2. 加载本地 VJEPA-2 `vitg` checkpoint：`checkpoints/vitg.pt`。
+3. 以 16 帧窗口滑动计算 VJEPA surprise/loss。
+4. 输出 `VJEPA Surprise Score` 和 `VJEPA Similarity Score`。
+
+### 5.3 运行记录
+
+| 指标 | 数值 |
+| --- | --- |
+| 输入视频 | `./results/magi1_output.mp4` |
+| VJEPA 模型 | `vitg` |
+| window size | `16` |
+| context frames | `8` |
+| stride | `8` |
+| 单命令总运行时间 | `1 分钟左右` |
+| 峰值显存 | `5GB 左右` |
+| VJEPA Surprise Score | `0.397691` |
+| VJEPA Similarity Score | `0.602309` |
+
+## 6. 批量 vanilla 复现
+
+### 6.1 运行命令
+
+5 小时内建议先运行小批量 vanilla：
+
+```bash
+cd /root/physics-consistency-eval/WMReward
+conda activate wmreward1
+
+BATCH_MAX_ENTRIES=8 \
+NUM_FRAMES=49 \
+VIDEO_HEIGHT=480 \
+VIDEO_WIDTH=720 \
+NUM_SAMPLING_STEPS=50 \
+bash generation/generate_i2v_magi1_multinode.sh \
+  2>&1 | tee logs/generate_i2v_magi1_4_5b_vanilla_batch_5h.log
+```
+
+完整 batch vanilla 命令：
+
+```bash
+cd /root/physics-consistency-eval/WMReward
+conda activate wmreward1
+
+bash generation/generate_i2v_magi1_multinode.sh \
+  2>&1 | tee logs/generate_i2v_magi1_4_5b_vanilla_batch.log
+```
+
+该命令执行内容：
+
+1. 读取 `prompts/physics_iq.json`。
+2. 对每条 PhysicsIQ 样本生成 1 个 MAGI-1 4.5B vanilla 视频。
+3. 输出到 `generated_videos/<group>/MAGI-1-4.5B_base/`。
+
+### 6.2 运行记录
+
+| 指标 | 数值 |
+| --- | --- |
+| 样本数量 | `[待填]` |
+| 每条候选视频数 | `1` |
+| BATCH_MAX_ENTRIES | `[待填]` |
+| NUM_FRAMES / 分辨率 / steps | `[待填]` |
+| 总运行时间 | `[待填]` |
+| 平均单样本时间 | `[待填]` |
+| 峰值显存 | `[待填]` |
+| 输出目录大小 | `[待填]` |
+
+## 7. Best-of-N / rejection 复现
+
+### 7.1 运行命令
+
+5 小时内建议只做小 N、小批量：
+
+```bash
+cd /root/physics-consistency-eval/WMReward
+conda activate wmreward1
+
+SAMPLE_METHODS_OVERRIDE="rejection" \
+REJECTION_SAMPLES=2 \
+BATCH_MAX_ENTRIES=3 \
+NUM_FRAMES=49 \
+VIDEO_HEIGHT=480 \
+VIDEO_WIDTH=720 \
+NUM_SAMPLING_STEPS=50 \
+bash generation/generate_i2v_magi1_multinode.sh \
+  2>&1 | tee logs/generate_i2v_magi1_4_5b_rejection_n2_5h.log
+```
+
+常规 N=2 命令：
+
+```bash
+cd /root/physics-consistency-eval/WMReward
+conda activate wmreward1
+
+SAMPLE_METHODS_OVERRIDE="rejection" REJECTION_SAMPLES=2 \
+  bash generation/generate_i2v_magi1_multinode.sh \
+  2>&1 | tee logs/generate_i2v_magi1_4_5b_rejection_n2.log
+```
+
+该命令执行内容：
+
+1. 每条样本生成 `REJECTION_SAMPLES` 个候选视频。
+2. 对每个候选视频计算 VJEPA loss。
+3. 保存 VJEPA loss 最低的候选作为最终结果。
+
+如需对齐论文中的 Best-of-16，可使用：
+
+```bash
+SAMPLE_METHODS_OVERRIDE="rejection" REJECTION_SAMPLES=16 \
+  bash generation/generate_i2v_magi1_multinode.sh \
+  2>&1 | tee logs/generate_i2v_magi1_4_5b_rejection_n16.log
+```
+
+### 7.2 运行记录
+
+| 指标 | N=2 | N=16 |
+| --- | --- | --- |
+| 样本数量 | `[待填]` | `[待填]` |
+| 每条候选视频数 | `2` | `16` |
+| 总运行时间 | `[待填]` | `[待填]` |
+| 平均单样本时间 | `[待填]` | `[待填]` |
+| 峰值显存 | `[待填]` | `[待填]` |
+| 平均最佳 VJEPA loss | `[待填]` | `[待填]` |
+
+按当前单样本推理速度估算，`REJECTION_SAMPLES=16` 的单样本生成时间约为 `38.5 分钟 x 16 = 10.3 小时`，另需叠加 VJEPA 打分时间。
+
+## 8. Guidance 对比实验
+
+### 8.1 实验设计
+
+guidance 对比实验建议只取相同的 1-2 条 PhysicsIQ 样本，分别运行 vanilla 和 guidance，并使用相同的轻量生成配置、相同 seed、相同 VJEPA 打分参数进行比较。
+
+推荐先跑 1 条样本：
+
+```text
+BATCH_START_IDX = 0
+BATCH_MAX_ENTRIES = 1
+NUM_FRAMES = 49
+VIDEO_HEIGHT = 480
+VIDEO_WIDTH = 720
+NUM_SAMPLING_STEPS = 50
+SEED = 42
+```
+
+对比指标：
+
+| 指标 | 说明 |
+| --- | --- |
+| 总运行时间 | 记录单条 vanilla 和 guidance 的 wall time |
+| 峰值显存 | 通过 `nvidia-smi` 记录 |
+| WMReward / VJEPA Surprise Score | 越低通常表示视频动态越容易被 world model 预测 |
+| 输出视频主观质量 | 记录是否出现明显静态、形变、物理不连续 |
+
+guidance 比 vanilla 慢，并且 A100 40G 有 OOM 风险。建议先使用较低频率：
+
+```text
+GUIDANCE_SCALE = 0.001
+GUIDANCE_FREQUENCY = 5
+```
+
+如果显存和时间可接受，再尝试：
+
+```text
+GUIDANCE_FREQUENCY = 1
+```
+
+### 8.2 准备 VJEPA checkpoint
+
+运行命令：
+
+```bash
+cd /root/physics-consistency-eval/WMReward
+conda activate wmreward1
+
+ls -lh checkpoints/vitg.pt
+
+mkdir -p /root/.cache/torch/hub/checkpoints
+ln -sf /root/physics-consistency-eval/WMReward/checkpoints/vitg.pt \
+  /root/.cache/torch/hub/checkpoints/vitg.pt
+```
+
+这一步保证 guidance pipeline 和后续 `compute_wmreward.py` 都能复用本地 `vitg.pt`，避免重新访问错误的 `http://localhost:8300/vitg.pt`。
+
+### 8.3 运行 vanilla baseline
+
+运行命令：
+
+```bash
+cd /root/physics-consistency-eval/WMReward
+conda activate wmreward1
+mkdir -p logs
+
+BATCH_START_IDX=0 \
+BATCH_MAX_ENTRIES=1 \
+NUM_FRAMES=49 \
+VIDEO_HEIGHT=480 \
+VIDEO_WIDTH=720 \
+NUM_SAMPLING_STEPS=50 \
+SAMPLE_METHODS_OVERRIDE="vanilla" \
+bash generation/generate_i2v_magi1_multinode.sh \
+  2>&1 | tee logs/guidance_compare_vanilla_1sample.log
+```
+
+输出视频路径：
+
+```text
+generated_videos/physics_iq/MAGI-1-4.5B_base/vanilla_v2_f49_s50_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4
+```
+
+### 8.4 运行 guidance
+
+保守 guidance 配置：
+
+```bash
+cd /root/physics-consistency-eval/WMReward
+conda activate wmreward1
+mkdir -p logs
+
+BATCH_START_IDX=0 \
+BATCH_MAX_ENTRIES=1 \
+NUM_FRAMES=49 \
+VIDEO_HEIGHT=480 \
+VIDEO_WIDTH=720 \
+NUM_SAMPLING_STEPS=50 \
+SAMPLE_METHODS_OVERRIDE="guidance" \
+GUIDANCE_SCALE=0.001 \
+GUIDANCE_FREQUENCY=5 \
+VJEPA_VARIANT_OVERRIDE="vit_giant" \
+bash generation/generate_i2v_magi1_multinode.sh \
+  2>&1 | tee logs/guidance_compare_guidance_gs0.001_gf5_1sample.log
+```
+
+输出视频路径：
+
+```text
+generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_v2_f49_s50_gs0.001_gf5_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4
+```
+
+如果保守配置能跑通，并且显存还有余量，可以尝试更高频率 guidance：
+
+```bash
+BATCH_START_IDX=0 \
+BATCH_MAX_ENTRIES=1 \
+NUM_FRAMES=49 \
+VIDEO_HEIGHT=480 \
+VIDEO_WIDTH=720 \
+NUM_SAMPLING_STEPS=50 \
+SAMPLE_METHODS_OVERRIDE="guidance" \
+GUIDANCE_SCALE=0.001 \
+GUIDANCE_FREQUENCY=1 \
+VJEPA_VARIANT_OVERRIDE="vit_giant" \
+bash generation/generate_i2v_magi1_multinode.sh \
+  2>&1 | tee logs/guidance_compare_guidance_gs0.001_gf1_1sample.log
+```
+
+预估耗时：
+
+| 配置 | 样本数 | 预计耗时 | 风险 |
+| --- | --- | --- | --- |
+| vanilla, 49 帧, 480x720, 50 steps | 1 | `10-20 分钟` | 低 |
+| guidance, `gf=5` | 1 | `40-90 分钟` | 中，有 OOM 风险 |
+| guidance, `gf=1` | 1 | `1.5-3 小时` | 高，A100 40G 可能 OOM |
+| guidance, `BATCH_MAX_ENTRIES=2` | 2 | 约为单条 2 倍 | 高 |
+
+5 小时内建议最多运行：
+
+```text
+1 条 vanilla + 1 条 guidance(gf=5) + 1 条 guidance(gf=1 可选)
+```
+
+### 8.5 计算 vanilla 与 guidance 的 WMReward
+
+vanilla 输出打分：
+
+```bash
+python compute_wmreward.py \
+  --video_path generated_videos/physics_iq/MAGI-1-4.5B_base/vanilla_v2_f49_s50_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4 \
+  --model vitg \
+  --window_size 16 \
+  --context_frames 8 \
+  --stride 8 \
+  2>&1 | tee logs/guidance_compare_vanilla_wmreward.log
+```
+
+guidance `gf=5` 输出打分：
+
+```bash
+python compute_wmreward.py \
+  --video_path generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_v2_f49_s50_gs0.001_gf5_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4 \
+  --model vitg \
+  --window_size 16 \
+  --context_frames 8 \
+  --stride 8 \
+  2>&1 | tee logs/guidance_compare_guidance_gf5_wmreward.log
+```
+
+guidance `gf=1` 输出打分：
+
+```bash
+python compute_wmreward.py \
+  --video_path generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_v2_f49_s50_gs0.001_gf1_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4 \
+  --model vitg \
+  --window_size 16 \
+  --context_frames 8 \
+  --stride 8 \
+  2>&1 | tee logs/guidance_compare_guidance_gf1_wmreward.log
+```
+
+### 8.6 运行记录
+
+| 配置 | 样本数 | 总运行时间 | 峰值显存 | VJEPA Surprise Score | VJEPA Similarity Score | 输出视频大小 |
+| --- | --- | --- | --- | --- | --- | --- |
+| vanilla | `1` | `[待填]` | `[待填]` | `[待填]` | `[待填]` | `[待填]` |
+| guidance, `gs=0.001`, `gf=5` | `1` | `[待填]` | `[待填]` | `[待填]` | `[待填]` | `[待填]` |
+| guidance, `gs=0.001`, `gf=1` | `1` | `[待填]` | `[待填]` | `[待填]` | `[待填]` | `[待填]` |
+
+结论记录：
+
+```text
+[待填：guidance 是否降低 VJEPA Surprise Score]
+[待填：guidance 是否明显增加耗时和显存]
+[待填：输出视频主观质量变化]
+```
+
+## 9. 轻量化配置对比
+
+若默认配置耗时过长，可降低帧数、分辨率和采样步数进行 smoke test。建议修改：
+
+```text
+MAGI-1/example/4.5B/4.5B_base_config.json
+```
+
+轻量验证配置：
+
+```json
+{
+  "num_frames": 48,
+  "video_size_h": 480,
+  "video_size_w": 480,
+  "num_steps": 24
+}
+```
+
+配置对比记录：
+
+| 配置 | 分辨率 | 帧数 | 步数 | 单样本总时间 | 峰值显存 | WMReward Score |
+| --- | --- | --- | --- | --- | --- | --- |
+| 默认配置 | `720x720` | `96` | `64` | `[待填，当前推理阶段 38 分 33 秒]` | `[待填]` | `[待填]` |
+| 轻量配置 | `480x480` | `48` | `24` | `[待填]` | `[待填]` | `[待填]` |
+
+## 10. 实验产物
+
+| 产物 | 路径 | 关键记录 |
+| --- | --- | --- |
+| 单样本生成日志 | `logs/generate_magi1_4_5b_i2v.log` | 总时间 `[待填]` |
+| 单样本输出视频 | `results/magi1_output.mp4` | 大小 `[待填]` |
+| WMReward 日志 | `logs/compute_wmreward_magi1_output_vitg.log` | Surprise `[待填]` |
+| 批量 vanilla 日志 | `logs/generate_i2v_magi1_4_5b_vanilla_batch.log` | 总时间 `[待填]` |
+| rejection N=2 日志 | `logs/generate_i2v_magi1_4_5b_rejection_n2.log` | 总时间 `[待填]` |
+| rejection N=16 日志 | `logs/generate_i2v_magi1_4_5b_rejection_n16.log` | 总时间 `[待填]` |
+| guidance 对比日志 | `logs/guidance_compare_*.log` | 总时间 / Surprise `[待填]` |
+
+## 11. 关键结论
+
+1. 当前单样本 MAGI-1 4.5B vanilla I2V 推理阶段已观测耗时为 `38 分 33 秒`。
+2. 当前单样本命令只生成 `1` 个候选视频；只有 `REJECTION_SAMPLES=16` 时才会为每条样本生成 16 个候选视频。
+3. 单卡 A100 40G 更适合先跑 vanilla 和小 N rejection；`N=16` 的单样本耗时约为 10 小时量级。
+4. `--guidance_scale 0` 表示关闭 gradient guidance，生成阶段不会使用 VJEPA；VJEPA 只在后续 WMReward 打分或 rejection 选择候选时使用。
+
+
+---
+
+## 2026-07-07 单卡 A100 guidance 最小闭环复现实验
+
+### 目标
+
+在仅一张 A100 40GB、实验时间有限的条件下，用部分 PhysicsIQ 数据完成 MAGI-1-4.5B 的 baseline vanilla 与 WMReward/V-JEPA guidance 对照，重点验证 guidance 路径确实参与生成，并观察 WMReward 指标方向。
+
+### 关键工程修复
+
+- 修复 V-JEPA `vitg.pt` 加载路径：优先使用仓库本地 checkpoint loader，避免 torch hub 下载/缓存问题。
+- V-JEPA target encoder 与 encoder 共享冻结权重，减少显存。
+- V-JEPA 默认驻留 CPU，仅在 guidance loss/grad 窗口搬到 GPU。
+- guidance VAE decode 前后 offload V-JEPA，并在 guidance 返回前 detach/清理临时张量。
+- 新增 `VJEPA_GUIDANCE_TARGET_FPS` 与 `VJEPA_GUIDANCE_MAX_CALLS` 环境变量。本次用 `MAX_CALLS=1` 保留一次真实 guidance，避免第二次 differentiable VAE decode 在 40GB 显存上 OOM。
+
+### 显存试错结论
+
+- `f49/s40/480x720` 与 `f25/s32/320x480` 在单卡 A100 40GB 上不可行。
+- `f25/s32/256x384` 可以完成第一次 guidance loss/grad，但最后 DiT forward 仍差约 28MB OOM。
+- 最终可稳定闭环配置为：`NUM_FRAMES=25`, `NUM_SAMPLING_STEPS=32`, `VIDEO_HEIGHT=192`, `VIDEO_WIDTH=320`, `CFG=6.0`, `seed=42`, `VJEPA=vitg`, `VJEPA_GUIDANCE_TARGET_FPS=4`, `VJEPA_GUIDANCE_MAX_CALLS=1`。
+
+### 生成结果
+
+PhysicsIQ 条目：`0001_trimmed-ball-and-block-fall.mp4`
+
+| 方法 | Guidance scale | 输出视频 | 生成日志 | 备注 |
+|---|---:|---|---|---|
+| vanilla | - | `generated_videos/physics_iq/MAGI-1-4.5B_base/vanilla_v2_f25_s32_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4` | `logs/vanilla_f25_s32_h192w320_1sample.log` | max memory allocated 10.74GB |
+| guidance | 0.001 | `generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_v2_f25_s32_gs0.001_gf5_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4` | `logs/guidance_cleanup_tfps4_max1_gs0.001_gf5_f25_s32_h192w320_1sample.log` | loss 0.712718, grad norm 1.223113, max memory allocated 28.27GB |
+| guidance | 0.005 | `generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_v2_f25_s32_gs0.005_gf5_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4` | `logs/guidance_cleanup_tfps4_max1_gs0.005_gf5_f25_s32_h192w320_1sample.log` | loss 0.712718, grad norm 1.223076, max memory allocated 28.27GB |
+
+### WMReward / V-JEPA Surprise Score
+
+打分命令均使用 `python compute_wmreward.py --video_path <mp4> --model vitg`。
+
+| 方法 | Guidance scale | Surprise score ↓ | Similarity ↑ | score log |
+|---|---:|---:|---:|---|
+| vanilla | - | 0.416858 | 0.583142 | `logs/score_vanilla_f25_s32_h192w320_0001.log` |
+| guidance | 0.001 | 0.416821 | 0.583179 | `logs/score_guidance_f25_s32_h192w320_gs0.001_gf5_max1_0001.log` |
+| guidance | 0.005 | 0.416785 | 0.583215 | `logs/score_guidance_f25_s32_h192w320_gs0.005_gf5_max1_0001.log` |
+
+结论：在相同 PhysicsIQ 条目、帧数、steps、分辨率和 seed 下，guidance 版本的 VJEPA Surprise 低于 vanilla，且 `0.005` 比 `0.001` 改善更明显。单样本差异很小，但方向与 guidance 优化目标一致，同时日志中有明确 `loss / rho / scaling / grad norm`，可以证明 guidance 实际注入了 velocity 更新。
+
+### 后续建议
+
+- 若还有时间，优先沿用 `192x320/f25/s32/gs0.005/max_calls=1` 扩展到 PhysicsIQ 前 3-5 条，汇总均值，而不是回到 `256x384` 硬顶显存。
+- 如果必须提高分辨率，可尝试 `224x352`，仍保留 `MAX_CALLS=1`；`256x384` 已证明非常接近 40GB 上限，不建议批量跑。
+- 正式报告中应说明本复现是 A100 40GB 受限版本：模型换为 MAGI-1-4.5B，分辨率降为 192x320，guidance 每视频只调用一次。
+
+## 10. 新服务器双卡 CP2 guidance 复现记录（2026-07-08）
+
+### 机器与环境
+
+- 新服务器：`connect.westd.seetacloud.com:23899`。
+- 实际 GPU：2 x NVIDIA RTX PRO 6000 Blackwell Server Edition，约 `97.9GB/卡`，不是 H800。
+- 仓库路径：`/root/physics-consistency-eval/WMReward`，实际位于数据盘 `/root/autodl-tmp/physics-consistency-eval/WMReward`。
+- conda 环境：`/root/miniconda3/envs/wmreward1`。
+- `torch 2.4.0+cu124` 不支持 Blackwell `sm_120`，已升级到 `torch 2.11.0+cu128`、`torchvision 0.26.0+cu128`、`triton 3.6.0`。
+- 原 `flash_attn 2.6.3` ABI 不兼容，当前使用 `MAGI-1/inference/model/flash_attn_fallback.py` 的 PyTorch SDPA fallback。fallback 已补充 GQA/MQA head repeat，可支持 MAGI 的 `q_heads=24, kv_heads=8`。
+
+### 正常分辨率试错结论
+
+- guidance 的 step 数需要满足 `num_steps % len(noise2clean_kvrange) == 0`。当前 `noise2clean_kvrange=[5,4,3,2]`，因此 `50 steps` 会触发断言，正式运行改为 `64 steps`。
+- 单卡独立样本方式运行 `f96 / 720x720 / 64 steps` 会 OOM，SDPA fallback 下单卡约 `95GB` 仍不够。
+- 单卡独立样本方式运行 `f49 / 480x720 / 64 steps` 也会在第二个推理段 OOM。因此双卡不能只做样本并行，必须让单样本拆到两张卡。
+- `BATCH_START_IDX=0` 的 `0001_trimmed-ball-and-block-fall.mp4` 在高分辨率输入预处理时 ffmpeg 报 `png inflate returned error -3`，本轮正式 guidance 从 `0002` 开始。
+
+### 可行配置
+
+创建临时配置 `/root/autodl-tmp/4.5B_base_config_cp2.json`，仅将 `engine_config.cp_size` 从 `1` 改为 `2`，并使用 `torchrun --nproc_per_node=2` 运行单样本 context parallel。
+
+```bash
+VJEPA_GUIDANCE_TARGET_FPS=4 \
+VJEPA_GUIDANCE_MAX_CALLS=1 \
+torchrun --nproc_per_node=2 --master_port=<port> generator_i2v_multinode.py \
+  --config_file /root/autodl-tmp/4.5B_base_config_cp2.json \
+  --magi_model_variant 4.5B_base \
+  --sampling_method guidance \
+  --num_inference_steps 64 \
+  --num_frames 49 \
+  --height 480 \
+  --width 720 \
+  --guidance_scale 0.001 \
+  --guidance_frequency 5 \
+  --vjepa_variant vit_giant \
+  --config_version cp2max1
+```
+
+### 生成产物
+
+输出目录：
+
+```text
+generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_cp2max1_f49_s64_gs0.001_gf5_cfg6.0_seed42/
+```
+
+已生成 `0002` 到 `0008` 共 7 条 guidance 视频。每条日志均包含真实 guidance 调用，例如 `apply guidance 0` 以及对应 `loss`。CP2 峰值显存约 `43.8GB/卡`。
+
+关键日志：
+
+- `logs/newserver_cp2_guidance_cp2max1_f49_s64_h480w720_idx1_1_gs0.001_gf5.log`
+- `logs/newserver_cp2_guidance_cp2max1_f49_s64_h480w720_idx1_7_gs0.001_gf5.log`
+- `logs/newserver_cp2_guidance_cp2max1_f49_s64_h480w720_idx5_3_gs0.001_gf5.log`
+
+### WMReward / V-JEPA Surprise Score
+
+汇总文件：
+
+```text
+logs/newserver_cp2_guidance_cp2max1_f49_s64_h480w720_scores.tsv
+```
+
+| video | surprise | similarity |
+|---|---:|---:|
+| 0002_trimmed-ball-and-block-fall.mp4 | 0.432365 | 0.567635 |
+| 0003_trimmed-ball-and-block-fall.mp4 | 0.447834 | 0.552166 |
+| 0004_trimmed-ball-behind-rotating-paper.mp4 | 0.435288 | 0.564712 |
+| 0005_trimmed-ball-behind-rotating-paper.mp4 | 0.457647 | 0.542353 |
+| 0006_trimmed-ball-behind-rotating-paper.mp4 | 0.440295 | 0.559705 |
+| 0007_trimmed-ball-hits-duck.mp4 | 0.439664 | 0.560336 |
+| 0008_trimmed-ball-hits-duck.mp4 | 0.394655 | 0.605345 |
+
+### 当前结论
+
+- 新服务器可以支持 MAGI-1-4.5B 的正常分辨率 guidance 复现，但需要 `cp_size=2` 把单样本拆到双卡。
+- 在当前 SDPA fallback 下，MAGI 原始 `96 frames / 720x720 / 64 steps` 仍不能以单卡样本并行方式完成；`49 frames / 480x720 / 64 steps` 配合 CP2 已验证可行。
+- 本轮按最新要求未继续运行 vanilla。后续若需要 baseline，可直接复用同一个 `cp_size=2` 配置，把 `--sampling_method guidance` 改为 `vanilla`，并保持 `f49 / 480x720 / 64 steps`。
+- 远程断开时建议用 `setsid -f ... < /dev/null > log 2>&1` 启动，避免 SSH 断开导致 `torchrun` 收到 SIGHUP。
+
+
+## 2026-07-08 CP2 0001 guidance/baseline comparison
+
+### Purpose
+
+Supplement `0001_trimmed-ball-and-block-fall.mp4` under the same CP2 normal-resolution setting used for the previous guidance batch, then check whether a comparable baseline exists. No existing baseline matched `f49 / 480x720 / 64 steps / cfg6.0 / seed42 / cp_size=2`, so a new vanilla baseline was generated.
+
+### Additional code fix
+
+`generator_i2v_multinode.py` previously wrote every init frame to the fixed path `/tmp/magi1_init_frame.png`. This can corrupt the temporary PNG when multiple ranks or processes write/read it concurrently. It now writes process-unique temp PNGs under `/tmp/wmreward_magi1_init/`.
+
+For CP2 vanilla/guidance, MAGI already writes the final mp4 to `video_path`; the redundant `load_video(video_path)` and re-export step was removed for future runs to avoid rank1 post-write read races. The `0001` guidance video below was generated before this second cleanup, so its log contains a rank1 post-read traceback after the mp4 had already been written. The mp4 passed `ffprobe` and full ffmpeg decode.
+
+### Outputs
+
+| method | output | generation log |
+|---|---|---|
+| guidance | `generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_cp2max1_f49_s64_gs0.001_gf5_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4` | `logs/newserver_cp2_guidance_cp2max1_f49_s64_h480w720_idx0_1_gs0.001_gf5.log` |
+| vanilla | `generated_videos/physics_iq/MAGI-1-4.5B_base/vanilla_cp2_f49_s64_cfg6.0_seed42/0001_trimmed-ball-and-block-fall.mp4` | `logs/newserver_cp2_vanilla_f49_s64_h480w720_idx0_1.log` |
+
+`0001` guidance contained a real guidance call:
+
+```text
+apply guidance 0, guidance_frequency 5, guidance scale 0.001
+loss: 0.7149926424026489, rho: 0.001, scaling: 234.3042755126953, velocity norm: 1437.658447265625, grad norm: 3.8281757831573486
+```
+
+Both videos decode as `720x480`, `8 fps`, `72` frames.
+
+### WMReward comparison
+
+Summary file: `logs/newserver_cp2_0001_guidance_vs_vanilla_scores.tsv`
+
+| method | surprise | similarity |
+|---|---:|---:|
+| vanilla | 0.457875 | 0.542125 |
+| guidance | 0.458469 | 0.541531 |
+| guidance - vanilla | +0.000594 | -0.000594 |
+
+Conclusion for this specific sample: guidance was active, but `0001` does not show a WMReward improvement. It should be reported as a non-improving case rather than evidence of metric gain. The main CP2 guidance score summary was updated to include `0001`:
+
+```text
+logs/newserver_cp2_guidance_cp2max1_f49_s64_h480w720_scores.tsv
+```
+
+## 2026-07-08 CP2 baseline vs once-guidance vs gf=5 guidance, 0001-0008
+
+### Purpose
+
+Cleaned empty generated_video result dirs, reused existing one-guidance results without rerunning them, reran the same-config baseline, and ran dual-GPU guidance every 5 denoising steps for PhysicsIQ entries 0001-0008.
+
+Observed hardware: 2x NVIDIA RTX PRO 6000 Blackwell Server Edition, about 96GB each. This is what the machine reports, even though the rental description mentioned H800 80GB.
+
+### Cleanup
+
+Deleted 16 result directories under `generated_videos` that recursively contained no video files (`.mp4/.avi/.mov/.webm/.mkv`).
+
+### Generation settings
+
+Common setting:
+
+```text
+MAGI-1-4.5B_base, cp_size=2, f49, 480x720, 64 denoising steps, cfg_scale=6.0, seed=42
+batch_json=prompts/physics_iq.json
+base_dir=PhysicsIQ/code
+range=0001-0008
+```
+
+Baseline rerun:
+
+```text
+generated_videos/physics_iq/MAGI-1-4.5B_base/vanilla_cp2baseline_f49_s64_cfg6.0_seed42
+logs/newserver_cp2_baseline_rerun_f49_s64_h480w720_idx0_8.log
+```
+
+One-guidance reused, not rerun:
+
+```text
+generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_cp2max1_f49_s64_gs0.001_gf5_cfg6.0_seed42
+logs/newserver_cp2_guidance_cp2max1_f49_s64_h480w720_scores.tsv
+```
+
+gf=5 guidance run:
+
+```text
+generated_videos/physics_iq/MAGI-1-4.5B_base/guidance_cp2truegf5_f49_s64_gs0.001_gf5_cfg6.0_seed42_tfps4
+logs/newserver_cp2_guidance_truegf5_f49_s64_h480w720_idx0_8.log
+```
+
+gf=5 generation completed 8/8 videos with `EXIT_CODE:0`. The log contains 72 `loss:` lines, i.e. 9 guidance calls per video. Peak memory was about `45.32GB allocated / 45.45GB reserved`; no OOM occurred.
+
+### WMReward scores
+
+Score and comparison files:
+
+```text
+logs/newserver_cp2_baseline_f49_s64_h480w720_scores.tsv
+logs/newserver_cp2_guidance_cp2max1_f49_s64_h480w720_scores.tsv
+logs/newserver_cp2_guidance_truegf5_f49_s64_h480w720_scores.tsv
+logs/newserver_cp2_baseline_vs_guidance_compare_0001_0008.tsv
+logs/newserver_cp2_baseline_vs_guidance_compare_0001_0008_summary.md
+```
+
+Lower surprise is better; higher similarity is better.
+
+| method | mean surprise | mean similarity | surprise vs baseline | improved vs baseline |
+|---|---:|---:|---:|---:|
+| baseline | 0.430063 | 0.569936 | 0.000000 | - |
+| once guidance | 0.438277 | 0.561723 | +0.008214 | 2/8 |
+| guidance every 5 denoising steps | 0.429572 | 0.570428 | -0.000491 | 5/8 |
+
+Compared with once guidance, gf=5 reduced mean surprise by `0.008705`, with 6/8 samples lower than once guidance. On this PhysicsIQ subset, one guidance call does not show a metric gain, while repeated guidance gives a small average improvement over the same-config baseline and a clearer improvement over once guidance.

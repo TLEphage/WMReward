@@ -1,0 +1,12 @@
+[
+  {
+    "prompt": "Two pillows on a table and two grabber tools hanging above them from which a brown tennis ball and an orange block are suspended. The grabber tools let go of the ball and block. Static shot with no camera movement.",
+    "input_image": "physics-IQ-benchmark/switch-frames/0001_switch-frames_anyFPS_perspective-left_trimmed-ball-and-block-fall.jpg",
+    "output_video": "0001_trimmed-ball-and-block-fall.mp4"
+  },
+  {
+    "prompt": "A light beige coffee table with a small yellow rubber ducky on it. A mustard yellow couch is in the background. There is a black pipe on one end of the table and a brown tennis ball rolls out of it towards the rubber ducky. Static shot with no camera movement.",
+    "input_image": "physics-IQ-benchmark/switch-frames/0007_switch-frames_anyFPS_perspective-left_trimmed-ball-hits-duck.jpg",
+    "output_video": "0007_trimmed-ball-hits-duck.mp4"
+  }
+]
